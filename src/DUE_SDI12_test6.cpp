@@ -83,6 +83,7 @@ void SDI12Send(String message) {
   command = ""; 
 }
 
+<<<<<<< HEAD
 <<<<<<< Updated upstream
 // This is the function that needs to be modified for the pass task
 =======
@@ -276,11 +277,59 @@ void sendIdentification() {
 void SDI12Receive(String input) {
   Serial.print("Received SDI-12 command: ");
   Serial.println(input);
+=======
+// ================= SENSOR MEASUREMENT =================
+>>>>>>> a596775cf71c23d64d7d4f7208c2d1d82b6bd27e
 
-  if (input.length() < 5) {
+void takeMeasurement() {
+
+  // =================================================
+  // TODO:
+  // Put the actual BME680/BH1750 measurement code here.
+  // Other group members can modify this function.
+  // =================================================
+
+  if (bme.performReading()) {
+
+    temperature = bme.temperature;
+    humidity = bme.humidity;
+    pressure = bme.pressure / 100.0;
+    gas = bme.gas_resistance / 1000.0;
+
+  }
+
+  lux = lightMeter.readLightLevel();
+
+  measurementReady = true;
+}
+
+
+// ================= ADDRESS QUERY =================
+
+void addressQuery() {
+
+  // ?!
+  SDI12Send(String(deviceAddress));
+}
+
+
+// ================= CHANGE ADDRESS =================
+
+void changeAddress(String input) {
+
+  // Expected:
+  // aAb!
+  //
+  // Example:
+  // 0A1!
+  //
+  // Changes address from 0 -> 1
+
+  if (input.length() != 4) {
     return;
   }
 
+<<<<<<< HEAD
 <<<<<<< Updated upstream
   String address = String(deviceAddress);
   
@@ -387,16 +436,270 @@ void SDI12Receive(String input) {
       uint16_t lux = lightMeter.readLightLevel();
       bme.performReading();
       float temp = bme.temperature;
+=======
+  char oldAddress = input.charAt(0);
+  char newAddress = input.charAt(2);
+>>>>>>> a596775cf71c23d64d7d4f7208c2d1d82b6bd27e
 
-      // Copy this format for a response. 
-      // Create the human-readable string without the '0' address
-      String payload = "temperature: " + String(temp, 2) + " \n\rlux: " + String(lux);
+  // Make sure command is actually A
+  if (input.charAt(1) != 'A') {
+    return;
+  }
 
-      SDI12Send(payload);
-      Serial.println("Responding to TEST command");
-    }
-  } 
+  // Make sure command is being sent to our current address
+  if (oldAddress != deviceAddress) {
+    return;
+  }
+
+  // SDI-12 addresses are 0-9, A-Z, a-z
+  // This is a simple validation for now.
+  if (!(
+      (newAddress >= '0' && newAddress <= '9') ||
+      (newAddress >= 'A' && newAddress <= 'Z') ||
+      (newAddress >= 'a' && newAddress <= 'z')
+    )) {
+    return;
+  }
+
+  // Change address
+  deviceAddress = newAddress;
+
+  // Response is the NEW address
+  SDI12Send(String(deviceAddress));
+
+  Serial.print("Address changed to: ");
+  Serial.println(deviceAddress);
 }
+
+
+// ================= START MEASUREMENT =================
+
+void startMeasurement() {
+
+  // =================================================
+  // TODO:
+  // Other group member can implement measurement timing.
+  //
+  // Response format:
+  //
+  // atttn
+  //
+  // Example:
+  // 000205
+  //
+  // 0 = address
+  // 002 = 2 seconds
+  // 05 = 5 measurements
+  // =================================================
+
+  takeMeasurement();
+
+  String response =
+    String(deviceAddress) +
+    "00205";
+
+  SDI12Send(response);
+}
+
+
+// ================= SEND DATA =================
+
+void sendData(int dataNumber) {
+
+  // =================================================
+  // TODO:
+  // Implement D0-D9 data packets here.
+  //
+  // Required values:
+  // Temperature
+  // Humidity
+  // Pressure
+  // Gas
+  // Lux
+  //
+  // Example:
+  // 0+24.5+55.0+1013.2+450.0
+  // =================================================
+
+  if (!measurementReady) {
+    return;
+  }
+
+  if (dataNumber == 0) {
+
+    String response =
+      String(deviceAddress) +
+      String(temperature, 1) +
+      "+" + String(humidity, 1) +
+      "+" + String(pressure, 1) +
+      "+" + String(gas, 1) +
+      "+" + String(lux, 1);
+
+    SDI12Send(response);
+  }
+
+  // -------------------------------------------------
+  // TODO:
+  // D1-D9 can be implemented here if more than one
+  // data packet is required.
+  // -------------------------------------------------
+}
+
+
+// ================= SEND IDENTIFICATION =================
+
+void sendIdentification() {
+
+  // =================================================
+  // TODO:
+  // Insert student ID here.
+  //
+  // Required format:
+  //
+  // a14ENG20009mmmmmmvvvxxx
+  //
+  // where:
+  // a        = address
+  // 14       = SDI-12 v1.4
+  // ENG20009 = manufacturer
+  // mmmmmm   = first 6 characters of student ID
+  // vvv      = next 3 characters
+  // xxx      = can be ignored
+  // =================================================
+
+  String response =
+    String(deviceAddress) +
+    "14" +
+    "ENG20009" +
+    studentID +
+    "xxx";
+
+  SDI12Send(response);
+}
+
+
+// ================= SDI-12 COMMAND PARSER =================
+
+void SDI12Receive(String input) {
+
+  Serial.print("Received SDI-12 command: ");
+  Serial.println(input);
+
+  if (input.length() == 0) {
+    return;
+  }
+
+
+  // =================================================
+  // ADDRESS QUERY
+  // ?!
+  // =================================================
+
+  if (input == "?!") {
+
+    addressQuery();
+    return;
+  }
+
+
+  // =================================================
+  // COMMANDS MUST START WITH OUR ADDRESS
+  // =================================================
+
+  if (input.charAt(0) != deviceAddress) {
+    return;
+  }
+
+
+  // =================================================
+  // CHANGE ADDRESS
+  // aAb!
+  // =================================================
+
+  if (input.length() == 4 &&
+      input.charAt(1) == 'A') {
+
+    changeAddress(input);
+    return;
+  }
+
+
+  // =================================================
+  // START MEASUREMENT
+  // aM!
+  // =================================================
+
+  if (input == String(deviceAddress) + "M!") {
+
+    startMeasurement();
+    return;
+  }
+
+
+  // =================================================
+  // SEND DATA
+  // aD0! ... aD9!
+  // =================================================
+
+  if (input.length() == 3 &&
+      input.charAt(1) == 'D' &&
+      input.charAt(2) >= '0' &&
+      input.charAt(2) <= '9') {
+
+    int dataNumber = input.charAt(2) - '0';
+
+    sendData(dataNumber);
+    return;
+  }
+
+
+  // =================================================
+  // SEND IDENTIFICATION
+  // aI!
+  // =================================================
+
+  if (input == String(deviceAddress) + "I!") {
+
+    sendIdentification();
+    return;
+  }
+
+
+  // =================================================
+  // UNKNOWN COMMAND
+  // =================================================
+
+  Serial.println("Unknown SDI-12 command");
+}
+
+// This is the function that needs to be modified for the pass task
+// void SDI12Receive(String input) {
+//   Serial.print("Received SDI-12 command: ");
+//   Serial.println(input);
+
+//   if (input.length() < 5) {
+//     return;
+//   }
+
+//   String address = String(deviceAddress);
+
+//   if (String(input.charAt(0)) == address) {  
+//     if (input.substring(1, 5) == "TEST") {  // Listen for a specific string of characters. This can be anything.
+      
+//       // Execute code needed on command invocation
+//       uint16_t lux = lightMeter.readLightLevel();
+//       bme.performReading();
+//       float temp = bme.temperature;
+
+//       // Copy this format for a response. 
+//       // Create the human-readable string without the '0' address
+//       String payload = "temperature: " + String(temp, 2) + " \n\rlux: " + String(lux);
+
+//       SDI12Send(payload);
+//       Serial.println("Responding to TEST command");
+//     }
+//   } 
+// }
 
 void loop() {
   int byte;
