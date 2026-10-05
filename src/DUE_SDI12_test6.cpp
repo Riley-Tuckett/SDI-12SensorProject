@@ -83,6 +83,7 @@ void SDI12Send(String message) {
   command = ""; 
 }
 
+// This is the function that needs to be modified for the pass task
 void SDI12Receive(String input) {
   Serial.print("Received SDI-12 command: ");
   Serial.println(input);
@@ -94,12 +95,14 @@ void SDI12Receive(String input) {
   String address = String(deviceAddress);
   
   if (String(input.charAt(0)) == address) {  
-    if (input.substring(1, 5) == "TEST") {
+    if (input.substring(1, 5) == "TEST") {  // Listen for a specific string of characters. This can be anything.
       
+      // Execute code needed on command invocation
       uint16_t lux = lightMeter.readLightLevel();
       bme.performReading();
       float temp = bme.temperature;
 
+      // Copy this format for a response. 
       // Create the human-readable string without the '0' address
       String payload = "temperature: " + String(temp, 2) + " \n\rlux: " + String(lux);
 
