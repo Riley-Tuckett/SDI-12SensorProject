@@ -42,7 +42,7 @@ void setup() {
     Serial.println("Could not find a valid BME680 sensor, check wiring!"); 
     while (1); 
   } 
-  // Set the temperature, pressure and humidity oversampling 
+  // Set the temperature, pressure and humidity oversampling
   bme.setTemperatureOversampling(BME680_OS_8X); 
   bme.setPressureOversampling(BME680_OS_8X); 
   bme.setHumidityOversampling(BME680_OS_2X); 
@@ -75,11 +75,11 @@ void SDI12Send(String message) {
   digitalWrite(DIRO, HIGH);      // Switch back to RX 
    
  
-  // 1. Clear any bytes received in the hardware buffer while transmitting (echo) 
+  // Clear any bytes received in the hardware buffer while transmitting (echo) 
   while (Serial1.available()) { 
     Serial1.read(); 
   } 
-  // 2. Reset the software string buffer just to be safe 
+  // Reset the software string buffer just to be safe 
   command = "";  
 } 
  
