@@ -16,6 +16,7 @@ BH1750 lightMeter(0x23);
 String command;
 int deviceAddress = 0;
 String deviceIdentification = "allccccccccmmmmmmvvvxxx";
+String ChangeAddress = "aAB";
 
 void scanI2C() {
   Serial.println("I2C scan:");
