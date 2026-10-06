@@ -132,9 +132,9 @@ void SDI12Receive(String input) {
 
       switch (inputValueCommandCharacter){
         //Check that the command is an Address Change command.
-        case 'A':
+        case 'A': {
           char newAddress = input.charAt(2);
-        // Check that the new address is valid
+            // Check that the new address is valid
           if ((newAddress >= '0' && newAddress <= '9') || (newAddress >= 'A' && newAddress <= 'Z') || (newAddress >= 'a' && newAddress <= 'z')) {
             // Change the address
             deviceAddress = newAddress;
@@ -144,21 +144,21 @@ void SDI12Receive(String input) {
             Serial.print("Address changed to: ");
             Serial.println(deviceAddress);
           }
-          break;
+          break; }
         //Check if it's the Measurement Receive command.
-        case 'M':
-          break;
+        case 'M': {
+          break; }
         //Check if it's the Send Data command.
-        case 'D':
+        case 'D': {
           //uwu
-          break;
+          break; }
         //Check if it's the Identification command.
-        case 'I':
-          break;
+        case 'I': {
+          break; }
         //Default error message, if string isn't any of the valid commands input something valid.
-        default: 
+        default: {
           errorMessage();
-          break;
+          break; }
       }
     }
     return;
