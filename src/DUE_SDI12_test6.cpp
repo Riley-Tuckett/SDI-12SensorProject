@@ -162,7 +162,7 @@ void SDI12Receive(String input) {
       }
     }
     return;
-  } else if (input.length() == 2){
+  } else if (input.length() == 1){
     //If it is the Address Query Command, then Address the Query!
     if (input.charAt(0) == '?')
     {
