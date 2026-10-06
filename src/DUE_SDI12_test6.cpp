@@ -48,29 +48,7 @@ void setup() {
   Serial.begin(9600); 
   Wire.begin(); 
   scanI2C(); 
-  //The sensors are automatically assumed on.
-  bmeExsists = true;
-  bhExsists = true;
- 
-  // ================ BME680 ================ 
-  if (!bme.begin(0x76)) { 
-    Serial.println("Could not find a valid BME680 sensor, check wiring!"); 
-    //If the bme doesn't exsist return false.
-    bmeExsists = false;
-    while (1); 
-  } 
-  // Set the temperature, pressure and humidity oversampling
-  bme.setTemperatureOversampling(BME680_OS_8X); 
-  bme.setPressureOversampling(BME680_OS_8X); 
-  bme.setHumidityOversampling(BME680_OS_2X); 
- 
-  // ================ BH1750 ================ 
-  if (!lightMeter.begin()) { 
-    Serial.println("BH1750 not found at 0x23 (try address 0x5C or check wiring)");
-    //if the light sensor aka bh doesn't exsist return false.
-    bhExsists = false;
-  } 
- 
+
   // ================ SDI-12 ================ 
   Serial1.begin(1200, SERIAL_7E1);  // SDI-12 UART, configures serial port for 7 data bits, even parity, and 1 stop bit 
   pinMode(DIRO, OUTPUT);            // DIRO Pin 
@@ -134,7 +112,6 @@ void SDI12Receive(String input) {
 
   String address = String(deviceAddress);
 
-
   // =========================================================
   // PASS LEVEL: ADDRESS QUERY
   // Command: ?!
@@ -153,6 +130,52 @@ void SDI12Receive(String input) {
   // 0A1!
   //
   // Changes the sensor address from 0 to 1.
+  // =========================================================
+
+    // =========================================================
+  // PASS LEVEL: START MEASUREMENT
+  // Command: aM!
+  // Response: atttn<CR><LF>
+  //
+  // TODO: Other team member
+  //
+  // Example:
+  // 0M!
+  // Response:
+  // 00025
+  //
+  // ttt = measurement time
+  // n   = number of values
+  // =========================================================
+
+  // =========================================================
+  // PASS LEVEL: SEND DATA
+  // Commands: aD0! - aD9!
+  //
+  // TODO: Other team member
+  //
+  // Expected values:
+  // Temperature
+  // Humidity
+  // Pressure
+  // Gas
+  // Lux
+  // =========================================================
+
+  // =========================================================
+  // PASS LEVEL: SEND IDENTIFICATION
+  // Command: aI!
+  //
+  // TODO: Other team member
+  //
+  // Format:
+  // a14ENG20009mmmmmmvvvxxx
+  //
+  // a        = sensor address
+  // 14       = SDI-12 version
+  // ENG20009 = manufacturer
+  // Student ID
+  // xxx      = ignored
   // =========================================================
 
   //If the command is the length of 3 then it is a normal command, if it is 2 then it is the Address Query Command.
@@ -180,6 +203,28 @@ void SDI12Receive(String input) {
           break;
         //Check if it's the Measurement Receive command.
         case 'M': {
+          //The sensors are automatically assumed on.
+          bmeExsists = bme.begin(0x76);
+          bhExsists = lightMeter.begin();
+          
+          // ================ BME680 ================ 
+          if (bmeExsists == false) { 
+            Serial.println("Could not find a valid BME680 sensor, check wiring!"); 
+            //If the bme doesn't exsist return false.
+          } else {
+            //Set the temperature, pressure and humidity oversampling.
+            bme.setTemperatureOversampling(BME680_OS_8X); 
+            bme.setPressureOversampling(BME680_OS_8X); 
+            bme.setHumidityOversampling(BME680_OS_2X); 
+          }
+
+          // ================ BH1750 ================ 
+          if (bhExsists == false) { 
+            Serial.println("BH1750 not found at 0x23 (try address 0x5C or check wiring)");
+            //if the light sensor aka bh doesn't exsist return false.
+            bhExsists = false;
+          }
+
           //Get the number of sensors that are online.
           amountOfSensorsOnline = activeSensorCount();
           //Create response.
@@ -213,59 +258,6 @@ void SDI12Receive(String input) {
       errorMessage();
     }
   }
-
-
-  // =========================================================
-  // PASS LEVEL: START MEASUREMENT
-  // Command: aM!
-  // Response: atttn<CR><LF>
-  //
-  // TODO: Other team member
-  //
-  // Example:
-  // 0M!
-  // Response:
-  // 000205
-  //
-  // ttt = measurement time
-  // n   = number of values
-  // =========================================================
-
-
-
-  // =========================================================
-  // PASS LEVEL: SEND DATA
-  // Commands: aD0! - aD9!
-  //
-  // TODO: Other team member
-  //
-  // Expected values:
-  // Temperature
-  // Humidity
-  // Pressure
-  // Gas
-  // Lux
-  // =========================================================
-
-
-
-  // =========================================================
-  // PASS LEVEL: SEND IDENTIFICATION
-  // Command: aI!
-  //
-  // TODO: Other team member
-  //
-  // Format:
-  // a14ENG20009mmmmmmvvvxxx
-  //
-  // a        = sensor address
-  // 14       = SDI-12 version
-  // ENG20009 = manufacturer
-  // Student ID
-  // xxx      = ignored
-  // =========================================================
-
-
 
   // =========================================================
   // EXISTING TEST COMMAND
