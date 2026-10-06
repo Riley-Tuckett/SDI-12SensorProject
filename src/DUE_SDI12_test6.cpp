@@ -150,11 +150,71 @@ void SDI12Receive(String input) {
           break; }
         //Check if it's the Send Data command.
         case 'D': {
-          //uwu
+          switch (input.charAt(2)){
+            case '0': {
+              // Read the light level
+              uint16_t lux = lightMeter.readLightLevel();
+
+              // Send through to SDI-12
+              SDI12Send(String(lux, 1));
+
+              // Confirm response
+              Serial.println("Responding to LUX reading");
+              break;
+            }
+            case '1': {
+              // Read BME data
+              // Returns accessors temperature, humidity, pressure (kPa), and gas resistance (mOhm)
+              bme.performReading();
+
+              // Format into payload
+              String payload = (
+                String(bme.temperature, 1) + 
+                '+' + 
+                String(bme.humidity, 1) + 
+                '+' + 
+                String(bme.pressure / 100, 1) + 
+                '+' + 
+                String(bme.gas_resistance / 1000, 1));
+
+              // Pass payload into SDI-12
+              SDI12Send(payload);
+              
+              // Confirm response
+              Serial.println("Responding to BME reading");
+              break;
+            }
+            case '2': {
+              // Read sensors
+              uint16_t lux = lightMeter.readLightLevel();
+              bme.performReading();
+
+              // Format into payload
+              String payload = (
+                String(lux, 1) +
+                '+' +
+                String(bme.temperature, 1) + 
+                '+' + 
+                String(bme.humidity, 1) + 
+                '+' + 
+                String(bme.pressure / 100, 1) + 
+                '+' + 
+                String(bme.gas_resistance / 1000, 1));
+              
+              // Pass payload into SDI-12
+              SDI12Send(payload);
+
+              // Confirm response
+              Serial.println("Responding to sensor readings");
+              break;
+            }
+          }
           break; }
         //Check if it's the Identification command.
-        case 'I': {
-          break; }
+        case 'I':
+            {
+              break;
+            }
         //Default error message, if string isn't any of the valid commands input something valid.
         default: {
           errorMessage();
@@ -162,7 +222,7 @@ void SDI12Receive(String input) {
       }
     }
     return;
-  } else if (input.length() == 1){
+  } else if (input.length() == 2){
     //If it is the Address Query Command, then Address the Query!
     if (input.charAt(0) == '?')
     {
