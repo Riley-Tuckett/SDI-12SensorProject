@@ -3,10 +3,10 @@
 #include <Arduino.h> 
 #include <BH1750.h> 
 #include <Wire.h> 
- 
+
 // BME680 Setup 
 Adafruit_BME680 bme; 
- 
+
 // BH1750 Setup 
 BH1750 lightMeter(0x23); 
  
@@ -60,12 +60,23 @@ void setup() {
   digitalWrite(DIRO, HIGH); 
 } 
  
- 
+//Very Cool Error Message :).
+void errorMessage(){
+  Serial.println("Please return a valid response!!!");
+  Serial.println("Valid Commands Include:");
+  Serial.println("1. ?! - Address Query");
+  Serial.println("2. aAb! - Change Address");
+  Serial.println("3. aM! - Start Measurement");
+  Serial.println("4. aD0!-aD9! - Send Data");
+  Serial.println("5. aI! - Address Identification");
+}
+
 void SDI12Send(String message) { 
   Serial.print("message: \n");  
   Serial.println(message); 
    
   digitalWrite(DIRO, LOW);       // Enable TX 
+  delay(5);                       // Allow the SDI-12 bus to change direction
   Serial1.print(message + "\r\n"); 
   Serial1.flush();               // Wait for TX buffer 
    
@@ -73,7 +84,6 @@ void SDI12Send(String message) {
   delay(10);  
    
   digitalWrite(DIRO, HIGH);      // Switch back to RX 
-   
  
   // Clear any bytes received in the hardware buffer while transmitting (echo) 
   while (Serial1.available()) { 
@@ -81,7 +91,7 @@ void SDI12Send(String message) {
   } 
   // Reset the software string buffer just to be safe 
   command = "";  
-} 
+}
  
 // This is the function that needs to be modified for the pass task
 void SDI12Receive(String input) {
@@ -101,12 +111,6 @@ void SDI12Receive(String input) {
   // Default address is 0.
   // =========================================================
 
-  if (input == "?") {
-    SDI12Send(address);
-    return;
-  }
-
-
   // =========================================================
   // PASS LEVEL: CHANGE ADDRESS
   // Command: aAb!
@@ -118,30 +122,55 @@ void SDI12Receive(String input) {
   // Changes the sensor address from 0 to 1.
   // =========================================================
 
+  //If the command is the length of 3 then it is a normal command, if it is 2 then it is the Address Query Command.
   if (input.length() == 3) {
 
-    // Check that the command is addressed to this sensor
+    //Check that the command is addressed to this sensor.
     if (String(input.charAt(0)) == address) {
 
-      // Check that the command is an Address Change command
-      if (input.charAt(1) == 'A') {
+      char inputValueCommandCharacter = input.charAt(1);
 
-        char newAddress = input.charAt(2);
-
+      switch (inputValueCommandCharacter){
+        //Check that the command is an Address Change command.
+        case 'A':
+          char newAddress = input.charAt(2);
         // Check that the new address is valid
-        if ((newAddress >= '0' && newAddress <= '9') || (newAddress >= 'A' && newAddress <= 'Z') || (newAddress >= 'a' && newAddress <= 'z')) {
-          // Change the address
-          deviceAddress = newAddress;
+          if ((newAddress >= '0' && newAddress <= '9') || (newAddress >= 'A' && newAddress <= 'Z') || (newAddress >= 'a' && newAddress <= 'z')) {
+            // Change the address
+            deviceAddress = newAddress;
 
-          // Respond with the new address
-          SDI12Send(String(deviceAddress));
-          Serial.print("Address changed to: ");
-          Serial.println(deviceAddress);
-        }
+            // Respond with the new address
+            SDI12Send(String(deviceAddress));
+            Serial.print("Address changed to: ");
+            Serial.println(deviceAddress);
+          }
+          break;
+        //Check if it's the Measurement Receive command.
+        case 'M':
+          break;
+        //Check if it's the Send Data command.
+        case 'D':
+          //uwu
+          break;
+        //Check if it's the Identification command.
+        case 'I':
+          break;
+        //Default error message, if string isn't any of the valid commands input something valid.
+        default: 
+          errorMessage();
+          break;
       }
     }
-
     return;
+  } else if (input.length() == 2){
+    //If it is the Address Query Command, then Address the Query!
+    if (input.charAt(0) == '?')
+    {
+      SDI12Send(address);
+      return;
+    } else {
+      errorMessage();
+    }
   }
 
 
@@ -215,9 +244,8 @@ void SDI12Receive(String input) {
       float temp = bme.temperature;
 
       String payload =
-        "temperature: " +
         String(temp, 2) +
-        " \n\rlux: " +
+        '+' +
         String(lux);
 
       SDI12Send(payload);
