@@ -215,9 +215,8 @@ void SDI12Receive(String input) {
       float temp = bme.temperature;
 
       String payload =
-        "temperature: " +
         String(temp, 2) +
-        " \n\rlux: " +
+        '+' +
         String(lux);
 
       SDI12Send(payload);
