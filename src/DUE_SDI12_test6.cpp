@@ -66,6 +66,7 @@ void SDI12Send(String message) {
   Serial.println(message); 
    
   digitalWrite(DIRO, LOW);       // Enable TX 
+  delay(5);                       // Allow the SDI-12 bus to change direction
   Serial1.print(message + "\r\n"); 
   Serial1.flush();               // Wait for TX buffer 
    
