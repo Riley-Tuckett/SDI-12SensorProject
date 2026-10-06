@@ -76,6 +76,7 @@ void SDI12Send(String message) {
   Serial.println(message); 
    
   digitalWrite(DIRO, LOW);       // Enable TX 
+  delay(5);                       // Allow the SDI-12 bus to change direction
   Serial1.print(message + "\r\n"); 
   Serial1.flush();               // Wait for TX buffer 
    
@@ -243,9 +244,8 @@ void SDI12Receive(String input) {
       float temp = bme.temperature;
 
       String payload =
-        "temperature: " +
         String(temp, 2) +
-        " \n\rlux: " +
+        '+' +
         String(lux);
 
       SDI12Send(payload);
