@@ -1,8 +1,11 @@
+//INCLUDES:
 #include <Adafruit_BME680.h> 
 #include <Adafruit_Sensor.h> 
 #include <Arduino.h> 
 #include <BH1750.h> 
 #include <Wire.h> 
+
+//DEFINITIONS:
 
 // BME680 Setup 
 Adafruit_BME680 bme; 
@@ -12,11 +15,18 @@ BH1750 lightMeter(0x23);
  
 // SDI-12 Setup 
 #define DIRO 7 
- 
+
+//GLOBAL VARIABLES:
+
 String command; 
 char deviceAddress = '0'; 
 String deviceIdentification = "allccccccccmmmmmmvvvxxx"; 
- 
+int amountOfSensorsOnline = 0;
+bool bmeExsists = false;
+bool bhExsists = false;
+
+//I2C SETUP:
+
 void scanI2C() { 
   Serial.println("I2C scan:"); 
   for (uint8_t address = 1; address < 127; address++) { 
@@ -31,27 +41,14 @@ void scanI2C() {
   } 
 } 
  
+//SETUP:
+
 void setup() { 
   // Arduino IDE Serial Monitor 
   Serial.begin(9600); 
   Wire.begin(); 
   scanI2C(); 
- 
-  // ================ BME680 ================ 
-  if (!bme.begin(0x76)) { 
-    Serial.println("Could not find a valid BME680 sensor, check wiring!"); 
-    while (1); 
-  } 
-  // Set the temperature, pressure and humidity oversampling
-  bme.setTemperatureOversampling(BME680_OS_8X); 
-  bme.setPressureOversampling(BME680_OS_8X); 
-  bme.setHumidityOversampling(BME680_OS_2X); 
- 
-  // ================ BH1750 ================ 
-  if (!lightMeter.begin()) { 
-    Serial.println("BH1750 not found at 0x23 (try address 0x5C or check wiring)"); 
-  } 
- 
+
   // ================ SDI-12 ================ 
   Serial1.begin(1200, SERIAL_7E1);  // SDI-12 UART, configures serial port for 7 data bits, even parity, and 1 stop bit 
   pinMode(DIRO, OUTPUT);            // DIRO Pin 
@@ -59,6 +56,8 @@ void setup() {
   // HIGH to Receive from SDI-12 
   digitalWrite(DIRO, HIGH); 
 } 
+
+//FUNCTIONS:
  
 //Very Cool Error Message :).
 void errorMessage(){
@@ -69,6 +68,18 @@ void errorMessage(){
   Serial.println("3. aM! - Start Measurement");
   Serial.println("4. aD0!-aD9! - Send Data");
   Serial.println("5. aI! - Address Identification");
+}
+
+//Checks how many sensors are currently avalible, and adds the amount of sensors to the count, depending on if the device is working.
+int activeSensorCount(){
+  int count = 0;
+  if (bmeExsists == true){
+    count += 4;
+  }
+  if (bhExsists == true){
+    count += 1;
+  }
+  return count;
 }
 
 void SDI12Send(String message) { 
@@ -101,7 +112,6 @@ void SDI12Receive(String input) {
 
   String address = String(deviceAddress);
 
-
   // =========================================================
   // PASS LEVEL: ADDRESS QUERY
   // Command: ?!
@@ -120,6 +130,52 @@ void SDI12Receive(String input) {
   // 0A1!
   //
   // Changes the sensor address from 0 to 1.
+  // =========================================================
+
+    // =========================================================
+  // PASS LEVEL: START MEASUREMENT
+  // Command: aM!
+  // Response: atttn<CR><LF>
+  //
+  // TODO: Other team member
+  //
+  // Example:
+  // 0M!
+  // Response:
+  // 00025
+  //
+  // ttt = measurement time
+  // n   = number of values
+  // =========================================================
+
+  // =========================================================
+  // PASS LEVEL: SEND DATA
+  // Commands: aD0! - aD9!
+  //
+  // TODO: Other team member
+  //
+  // Expected values:
+  // Temperature
+  // Humidity
+  // Pressure
+  // Gas
+  // Lux
+  // =========================================================
+
+  // =========================================================
+  // PASS LEVEL: SEND IDENTIFICATION
+  // Command: aI!
+  //
+  // TODO: Other team member
+  //
+  // Format:
+  // a14ENG20009mmmmmmvvvxxx
+  //
+  // a        = sensor address
+  // 14       = SDI-12 version
+  // ENG20009 = manufacturer
+  // Student ID
+  // xxx      = ignored
   // =========================================================
 
   //If the command is the length of 3 then it is a normal command, if it is 2 then it is the Address Query Command.
@@ -146,8 +202,38 @@ void SDI12Receive(String input) {
           }
           break;
         //Check if it's the Measurement Receive command.
-        case 'M':
-          break;
+        case 'M': {
+          //The sensors are automatically assumed on.
+          bmeExsists = bme.begin(0x76);
+          bhExsists = lightMeter.begin();
+          
+          // ================ BME680 ================ 
+          if (bmeExsists == false) { 
+            Serial.println("Could not find a valid BME680 sensor, check wiring!"); 
+            //If the bme doesn't exsist return false.
+          } else {
+            //Set the temperature, pressure and humidity oversampling.
+            bme.setTemperatureOversampling(BME680_OS_8X); 
+            bme.setPressureOversampling(BME680_OS_8X); 
+            bme.setHumidityOversampling(BME680_OS_2X); 
+          }
+
+          // ================ BH1750 ================ 
+          if (bhExsists == false) { 
+            Serial.println("BH1750 not found at 0x23 (try address 0x5C or check wiring)");
+            //if the light sensor aka bh doesn't exsist return false.
+            bhExsists = false;
+          }
+
+          //Get the number of sensors that are online.
+          amountOfSensorsOnline = activeSensorCount();
+          //Create response.
+          String response = address + "003" + String(amountOfSensorsOnline);
+          //Print response for debugging and send to SDI12.
+          Serial.println(response);
+          SDI12Send(response);
+          break; 
+        }
         //Check if it's the Send Data command.
         case 'D':
           //uwu
@@ -172,59 +258,6 @@ void SDI12Receive(String input) {
       errorMessage();
     }
   }
-
-
-  // =========================================================
-  // PASS LEVEL: START MEASUREMENT
-  // Command: aM!
-  // Response: atttn<CR><LF>
-  //
-  // TODO: Other team member
-  //
-  // Example:
-  // 0M!
-  // Response:
-  // 000205
-  //
-  // ttt = measurement time
-  // n   = number of values
-  // =========================================================
-
-
-
-  // =========================================================
-  // PASS LEVEL: SEND DATA
-  // Commands: aD0! - aD9!
-  //
-  // TODO: Other team member
-  //
-  // Expected values:
-  // Temperature
-  // Humidity
-  // Pressure
-  // Gas
-  // Lux
-  // =========================================================
-
-
-
-  // =========================================================
-  // PASS LEVEL: SEND IDENTIFICATION
-  // Command: aI!
-  //
-  // TODO: Other team member
-  //
-  // Format:
-  // a14ENG20009mmmmmmvvvxxx
-  //
-  // a        = sensor address
-  // 14       = SDI-12 version
-  // ENG20009 = manufacturer
-  // Student ID
-  // xxx      = ignored
-  // =========================================================
-
-
 
   // =========================================================
   // EXISTING TEST COMMAND
@@ -254,6 +287,8 @@ void SDI12Receive(String input) {
     }
   }
 }
+
+//MAIN LOOP:
  
 void loop() { 
   int byte; 
