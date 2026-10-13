@@ -89,9 +89,126 @@ void SDI12Receive(String input) {
 
   String address = String(deviceAddress);
 
-  // The receive loop removes '!', so ?! arrives here as "?".
-  if (input == "?") {
-    SDI12Send(address);
+
+  // =========================================================
+  // PASS LEVEL: ADDRESS QUERY
+  // Command: ?!
+  // Response: a<CR><LF>
+  //
+  // Returns the current address of the sensor.
+  // Default address is 0.
+  // =========================================================
+
+  // =========================================================
+  // PASS LEVEL: CHANGE ADDRESS
+  // Command: aAb!
+  // Response: b<CR><LF>
+  //
+  // Example:
+  // 0A1!
+  //
+  // Changes the sensor address from 0 to 1.
+  // =========================================================
+
+  //If the command is the length of 3 then it is a normal command, if it is 2 then it is the Address Query Command.
+  if (input.length() == 3) {
+
+    //Check that the command is addressed to this sensor.
+    if (String(input.charAt(0)) == address) {
+
+      char inputValueCommandCharacter = input.charAt(1);
+
+      switch (inputValueCommandCharacter){
+        //Check that the command is an Address Change command.
+        case 'A': {
+          char newAddress = input.charAt(2);
+            // Check that the new address is valid
+          if ((newAddress >= '0' && newAddress <= '9') || (newAddress >= 'A' && newAddress <= 'Z') || (newAddress >= 'a' && newAddress <= 'z')) {
+            // Change the address
+            deviceAddress = newAddress;
+
+            // Respond with the new address
+            SDI12Send(String(deviceAddress));
+            Serial.print("Address changed to: ");
+            Serial.println(deviceAddress);
+          }
+          break; }
+        //Check if it's the Measurement Receive command.
+        case 'M': {
+          break; }
+        //Check if it's the Send Data command.
+        case 'D': {
+          switch (input.charAt(2)){
+            case '0': {
+              // Read the light level
+              uint16_t lux = lightMeter.readLightLevel();
+
+              // Send through to SDI-12
+              SDI12Send(String(lux, 1));
+
+              // Confirm response
+              Serial.println("Responding to LUX reading");
+              break;
+            }
+            case '1': {
+              // Read BME data
+              // Returns accessors temperature, humidity, pressure (kPa), and gas resistance (mOhm)
+              bme.performReading();
+
+              // Format into payload
+              String payload = (
+                String(bme.temperature, 1) + 
+                '+' + 
+                String(bme.humidity, 1) + 
+                '+' + 
+                String(bme.pressure / 100, 1) + 
+                '+' + 
+                String(bme.gas_resistance / 1000, 1));
+
+              // Pass payload into SDI-12
+              SDI12Send(payload);
+              
+              // Confirm response
+              Serial.println("Responding to BME reading");
+              break;
+            }
+            case '2': {
+              // Read sensors
+              uint16_t lux = lightMeter.readLightLevel();
+              bme.performReading();
+
+              // Format into payload
+              String payload = (
+                String(lux, 1) +
+                '+' +
+                String(bme.temperature, 1) + 
+                '+' + 
+                String(bme.humidity, 1) + 
+                '+' + 
+                String(bme.pressure / 100, 1) + 
+                '+' + 
+                String(bme.gas_resistance / 1000, 1));
+              
+              // Pass payload into SDI-12
+              SDI12Send(payload);
+
+              // Confirm response
+              Serial.println("Responding to sensor readings");
+              break;
+            }
+          }
+          break; }
+        //Check if it's the Identification command.
+        case 'I':
+            {
+              break;
+            }
+        //Default error message, if string isn't any of the valid commands input something valid.
+        default: {
+          errorMessage();
+          break; }
+      }
+    }
     return;
   }
 
