@@ -4,6 +4,9 @@
 #include <Arduino.h>
 #include <BH1750.h>
 #include <Wire.h>
+#include <RTClib.h>
+#include <SdFat.h>
+
 
 // DEFINITIONS:
 #define DIRO 7
@@ -22,6 +25,23 @@ bool bmeExists = false;
 bool bhExists = false;
 bool measurementReady = false;
 
+//SD CARD SETUP:
+const uint8_t SD_CS = 10;
+SdFs sd;
+FsFile dataLOG;
+SoftSpiDriver<12, 11, 13> softSpi;
+
+//SPECIAL SETUP:
+RTC_DS1307 rtc;
+const auto SD_CONFIG = SdSpiConfig(SD_CS, SHARED_SPI, SD_SCK_MHZ(0), &softSpi);
+
+//TIME:
+long unsigned millisBefore = 0;
+const long interval = 30000;
+int hour = 0;
+int minute = 0;
+int seconds = 0;
+
 void scanI2C() {
   Serial.println("I2C scan:");
   for (uint8_t address = 1; address < 127; address++) {
@@ -36,6 +56,7 @@ void scanI2C() {
   }
 }
 
+//This is a very cool error message :).
 void errorMessage() {
   Serial.println("Please return a valid response!!!");
   Serial.println("Valid Commands Include:");
@@ -235,10 +256,66 @@ void SDI12Receive(String input) {
   }
 }
 
+void ReadRTC(){
+  DateTime now = rtc.now();
+  int hours = now.hour();
+  int minutes = now.minute();
+  int seconds = now.second();
+}
+
+void ReadDataToSD(){
+
+}
+
+void WriteDataToSD(){
+  if (dataLOG == true){
+    //If the file is brand new, write a CSV header row.
+    if (dataLOG.size() == 0) {
+      dataLOG.println(F("temp,humidity,gas,lux,hourRTC,minuteRTC,secondRTC"));
+      dataLOG.sync(); //Save the header immediately.
+    }
+  }
+}
+
 void setup() {
   Serial.begin(9600);
   Wire.begin();
   scanI2C();
+
+  //THE RTC BEGINSSSSSSS!!!!!!!!!
+  rtc.begin();
+  rtc.adjust(DateTime(2026, 9, 18, 11, 59, 50));
+
+
+  Serial.println("Initializing SD card using Software SPI...");
+
+  //Configure the SD card Chip Select pin.
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
+
+  //Initialize the SD card using the Software SPI configuration.
+  if (!sd.begin(SD_CONFIG)) {
+    Serial.println("SD card initialization failed! Check wiring or card format (FAT32).");
+    return;
+  }
+  
+  Serial.println("SD card initialized successfully!");
+
+  //Open or create "LOG.CSV" in read/write/append mode.
+  dataLOG = sd.open("LOG.CSV", O_RDWR | O_CREAT | O_APPEND);
+  if (dataLOG == true){
+    //If the file is brand new, write a CSV header row.
+    if (dataLOG.size() == 0) {
+      dataLOG.println(F("temp,humidity,gas,lux,hourRTC,minuteRTC,secondRTC"));
+      dataLOG.sync(); //Save the header immediately.
+    }
+  //Close the file when done writing.
+    flightLog.close();
+    
+    Serial.println(F("Test data written to FLIGHT.CSV successfully!"));
+  } else {
+    Serial.println(F("Error: Could not open FLIGHT.CSV for writing."));
+  }
 
   Serial1.begin(1200, SERIAL_7E1);
   pinMode(DIRO, OUTPUT);
