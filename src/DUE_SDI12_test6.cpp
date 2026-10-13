@@ -95,12 +95,6 @@ void SDI12Receive(String input) {
     return;
   }
 
-  if (input.length() == 2 && input.charAt(0) == deviceAddress && input.charAt(1) == 'I') {
-    String identification = address + "14ENG20009105916092";
-    SDI12Send(identification);
-    return;
-  }
-
   if (input.length() != 3 || String(input.charAt(0)) != address) {
     if (input.length() != 5 || String(input.charAt(0)) != address || input.substring(1, 5) != "TEST") {
       errorMessage();
@@ -176,7 +170,7 @@ void SDI12Receive(String input) {
 
               // Confirm response
               Serial.println("Responding to LUX reading");
-              break;
+              return;
             }
             case '1': {
               // Read BME data
@@ -198,7 +192,7 @@ void SDI12Receive(String input) {
               
               // Confirm response
               Serial.println("Responding to BME reading");
-              break;
+              return;
             }
             case '2': {
               // Read sensors
@@ -222,16 +216,20 @@ void SDI12Receive(String input) {
 
               // Confirm response
               Serial.println("Responding to sensor readings");
-              break;
+              return;
             }
             default: {
               errorMessage();
-              break;
+              return;
             }
           }
           break; }
     case 'I':
-      errorMessage();
+        {
+        String identification = String(deviceAddress) + "14" + "ENG20009" + "105916092";
+        SDI12Send(identification);
+        return;
+        }
       return;
 
     default:
