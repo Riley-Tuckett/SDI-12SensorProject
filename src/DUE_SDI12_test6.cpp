@@ -1,66 +1,51 @@
-//INCLUDES:
-#include <Adafruit_BME680.h> 
-#include <Adafruit_Sensor.h> 
-#include <Arduino.h> 
-#include <BH1750.h> 
-#include <Wire.h> 
+// INCLUDES:
+#include <Adafruit_BME680.h>
+#include <Adafruit_Sensor.h>
+#include <Arduino.h>
+#include <BH1750.h>
+#include <Wire.h>
 
-//DEFINITIONS:
+// DEFINITIONS:
+Adafruit_BME680 bme;
+BH1750 lightMeter(0x23);
+#define DIRO 7
 
-// BME680 Setup 
-Adafruit_BME680 bme; 
-
-// BH1750 Setup 
-BH1750 lightMeter(0x23); 
- 
-// SDI-12 Setup 
-#define DIRO 7 
-
-//GLOBAL VARIABLES:
-
-String command; 
-char deviceAddress = '0'; 
-String deviceIdentification = "allccccccccmmmmmmvvvxxx"; 
+// GLOBAL VARIABLES:
+String command;
+char deviceAddress = '0';
+String deviceIdentification = "allccccccccmmmmmmvvvxxx";
 int amountOfSensorsOnline = 0;
 bool bmeExsists = false;
 bool bhExsists = false;
 
-//I2C SETUP:
+// I2C SETUP:
+void scanI2C() {
+  Serial.println("I2C scan:");
+  for (uint8_t address = 1; address < 127; address++) {
+    Wire.beginTransmission(address);
+    if (Wire.endTransmission() == 0) {
+      Serial.print("Found 0x");
+      if (address < 16) {
+        Serial.print("0");
+      }
+      Serial.println(address, HEX);
+    }
+  }
+}
 
-void scanI2C() { 
-  Serial.println("I2C scan:"); 
-  for (uint8_t address = 1; address < 127; address++) { 
-    Wire.beginTransmission(address); 
-    if (Wire.endTransmission() == 0) { 
-      Serial.print("Found 0x"); 
-      if (address < 16) { 
-        Serial.print("0"); 
-      } 
-      Serial.println(address, HEX); 
-    } 
-  } 
-} 
- 
-//SETUP:
+// SETUP:
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  scanI2C();
 
-void setup() { 
-  // Arduino IDE Serial Monitor 
-  Serial.begin(9600); 
-  Wire.begin(); 
-  scanI2C(); 
+  Serial1.begin(1200, SERIAL_7E1);
+  pinMode(DIRO, OUTPUT);
+  digitalWrite(DIRO, HIGH);
+}
 
-  // ================ SDI-12 ================ 
-  Serial1.begin(1200, SERIAL_7E1);  // SDI-12 UART, configures serial port for 7 data bits, even parity, and 1 stop bit 
-  pinMode(DIRO, OUTPUT);            // DIRO Pin 
- 
-  // HIGH to Receive from SDI-12 
-  digitalWrite(DIRO, HIGH); 
-} 
-
-//FUNCTIONS:
- 
-//Very Cool Error Message :).
-void errorMessage(){
+// FUNCTIONS:
+void errorMessage() {
   Serial.println("Please return a valid response!!!");
   Serial.println("Valid Commands Include:");
   Serial.println("1. ?! - Address Query");
@@ -70,278 +55,200 @@ void errorMessage(){
   Serial.println("5. aI! - Address Identification");
 }
 
-void SDI12Send(String message)
-{
-  Serial.print("message: \n");
-  Serial.println(message);
-
-  digitalWrite(DIRO, LOW); // Enable TX
-  delay(5);                // Allow the SDI-12 bus to change direction
-  Serial1.print(message + "\r\n");
-  Serial1.flush(); // Wait for TX buffer
-
-  // Wait 10ms for the hardware shift register to finish the stop bits
-  delay(10);
-
-  digitalWrite(DIRO, HIGH); // Switch back to RX
-
-  // Clear any bytes received in the hardware buffer while transmitting (echo)
-  while (Serial1.available())
-  {
-    Serial1.read();
-  }
-  // Reset the software string buffer just to be safe
-  command = "";
-//Checks how many sensors are currently avalible, and adds the amount of sensors to the count, depending on if the device is working.
-int activeSensorCount(){
+int activeSensorCount() {
   int count = 0;
-  if (bmeExsists == true){
+  if (bmeExsists) {
     count += 4;
   }
-  if (bhExsists == true){
+  if (bhExsists) {
     count += 1;
   }
   return count;
 }
 
-void SDI12Send(String message) { 
-  Serial.print("message: \n");  
-  Serial.println(message); 
-   
-  digitalWrite(DIRO, LOW);       // Enable TX 
-  delay(5);                       // Allow the SDI-12 bus to change direction
-  Serial1.print(message + "\r\n"); 
-  Serial1.flush();               // Wait for TX buffer 
-   
-  // Wait 10ms for the hardware shift register to finish the stop bits 
-  delay(10);  
-   
-  digitalWrite(DIRO, HIGH);      // Switch back to RX 
- 
-  // Clear any bytes received in the hardware buffer while transmitting (echo) 
-  while (Serial1.available()) { 
-    Serial1.read(); 
-  } 
-  // Reset the software string buffer just to be safe 
-  command = "";  
+void SDI12Send(String message) {
+  Serial.print("message: ");
+  Serial.println(message);
+
+  digitalWrite(DIRO, LOW);
+  delay(5);
+  Serial1.print(message + "\r\n");
+  Serial1.flush();
+  delay(10);
+  digitalWrite(DIRO, HIGH);
+
+  while (Serial1.available()) {
+    Serial1.read();
+  }
+  command = "";
 }
 
-// This is the function that needs to be modified for the pass task
-void SDI12Receive(String input)
-{
-
+void SDI12Receive(String input) {
   Serial.print("Received SDI-12 command: ");
   Serial.println(input);
 
   String address = String(deviceAddress);
 
-  if (input.length() == 2 &&
-      input.charAt(0) == deviceAddress &&
-      input.charAt(1) == 'I')
-  {
-    String identification = String(deviceAddress) + "14" + "ENG20009" + "105916092";
+  // The receive loop removes '!', so ?! arrives here as "?".
+  if (input == "?") {
+    SDI12Send(address);
+    return;
+  }
+
+  if (input.length() == 2 && input.charAt(0) == deviceAddress && input.charAt(1) == 'I') {
+    String identification = address + "14ENG20009105916092";
     SDI12Send(identification);
     return;
   }
 
-  // =========================================================
-  // PASS LEVEL: ADDRESS QUERY
-  // Command: ?!
-  // Response: a<CR><LF>
-  //
-  // Returns the current address of the sensor.
-  // Default address is 0.
-  // =========================================================
-
-  // =========================================================
-  // PASS LEVEL: CHANGE ADDRESS
-  // Command: aAb!
-  // Response: b<CR><LF>
-  //
-  // Example:
-  // 0A1!
-  //
-  // Changes the sensor address from 0 to 1.
-  // =========================================================
-
-  // If the command is the length of 3 then it is a normal command, if it is 2 then it is the Address Query Command.
-  if (input.length() == 3)
-  {
-    // =========================================================
-  // PASS LEVEL: START MEASUREMENT
-  // Command: aM!
-  // Response: atttn<CR><LF>
-  //
-  // TODO: Other team member
-  //
-  // Example:
-  // 0M!
-  // Response:
-  // 00025
-  //
-  // ttt = measurement time
-  // n   = number of values
-  // =========================================================
-
-  // =========================================================
-  // PASS LEVEL: SEND DATA
-  // Commands: aD0! - aD9!
-  //
-  // TODO: Other team member
-  //
-  // Expected values:
-  // Temperature
-  // Humidity
-  // Pressure
-  // Gas
-  // Lux
-  // =========================================================
-
-  // =========================================================
-  // PASS LEVEL: SEND IDENTIFICATION
-  // Command: aI!
-  //
-  // TODO: Other team member
-  //
-  // Format:
-  // a14ENG20009mmmmmmvvvxxx
-  //
-  // a        = sensor address
-  // 14       = SDI-12 version
-  // ENG20009 = manufacturer
-  // Student ID
-  // xxx      = ignored
-  // =========================================================
-
-  //If the command is the length of 3 then it is a normal command, if it is 2 then it is the Address Query Command.
-  if (input.length() == 3) {
-
-    // Check that the command is addressed to this sensor.
-    if (String(input.charAt(0)) == address)
-    {
-
-      char inputValueCommandCharacter = input.charAt(1);
-
-      switch (inputValueCommandCharacter)
-      {
-      // Check that the command is an Address Change command.
-      case 'A':
-        char newAddress = input.charAt(2);
-        // Check that the new address is valid
-        if ((newAddress >= '0' && newAddress <= '9') || (newAddress >= 'A' && newAddress <= 'Z') || (newAddress >= 'a' && newAddress <= 'z'))
-        {
-          // Change the address
-          deviceAddress = newAddress;
-
-          // Respond with the new address
-          SDI12Send(String(deviceAddress));
-          Serial.print("Address changed to: ");
-          Serial.println(deviceAddress);
-        }
-        break;
-      // Check if it's the Measurement Receive command.
-      case 'M':
-        break;
-      // Check if it's the Send Data command.
-      case 'D':
-        // uwu
-        break;
-      // Check if it's the Identification command.
-      case 'I':
-        break;
-      // Default error message, if string isn't any of the valid commands input something valid.
-      default:
-        errorMessage();
-        break;
-          if ((newAddress >= '0' && newAddress <= '9') || (newAddress >= 'A' && newAddress <= 'Z') || (newAddress >= 'a' && newAddress <= 'z')) {
-            // Change the address
-            deviceAddress = newAddress;
-
-            // Respond with the new address
-            SDI12Send(String(deviceAddress));
-            Serial.print("Address changed to: ");
-            Serial.println(deviceAddress);
-          }
-          break;
-        //Check if it's the Measurement Receive command.
-        case 'M': {
-          //The sensors are automatically assumed on.
-          bmeExsists = bme.begin(0x76);
-          bhExsists = lightMeter.begin();
-          
-          // ================ BME680 ================ 
-          if (bmeExsists == false) { 
-            Serial.println("Could not find a valid BME680 sensor, check wiring!"); 
-            //If the bme doesn't exsist return false.
-          } else {
-            //Set the temperature, pressure and humidity oversampling.
-            bme.setTemperatureOversampling(BME680_OS_8X); 
-            bme.setPressureOversampling(BME680_OS_8X); 
-            bme.setHumidityOversampling(BME680_OS_2X); 
-          }
-
-          // ================ BH1750 ================ 
-          if (bhExsists == false) { 
-            Serial.println("BH1750 not found at 0x23 (try address 0x5C or check wiring)");
-            //if the light sensor aka bh doesn't exsist return false.
-            bhExsists = false;
-          }
-
-          //Get the number of sensors that are online.
-          amountOfSensorsOnline = activeSensorCount();
-          //Create response.
-          String response = address + "003" + String(amountOfSensorsOnline);
-          //Print response for debugging and send to SDI12.
-          Serial.println(response);
-          SDI12Send(response);
-          break; 
-        }
-        //Check if it's the Send Data command.
-        case 'D':
-          //uwu
-          break;
-        //Check if it's the Identification command.
-        case 'I':
-          break;
-        //Default error message, if string isn't any of the valid commands input something valid.
-        default: 
-          errorMessage();
-          break;
-      }
-    }
-    return;
-  }
-  else if (input.length() == 2)
-  {
-    // If it is the Address Query Command, then Address the Query!
-    if (input.charAt(0) == '?')
-    {
-      SDI12Send(address);
+  if (input.length() != 3 || String(input.charAt(0)) != address) {
+    if (input.length() != 5 || String(input.charAt(0)) != address || input.substring(1, 5) != "TEST") {
+      errorMessage();
       return;
     }
-    else
-    {
-      errorMessage();
-    }
   }
 
-void loop()
-{
-  int byte;
-  if (Serial1.available())
-  {
-    byte = Serial1.read();
+  if (input.length() == 5 && input.substring(1, 5) == "TEST") {
+    bmeExsists = bme.begin(0x76);
+    bhExsists = lightMeter.begin();
 
-    if (byte == 33)
-    { // If byte is command terminator (!)
-      SDI12Receive(command);
-      command = ""; // reset command string
+    if (bmeExsists) {
+      bme.setTemperatureOversampling(BME680_OS_8X);
+      bme.setPressureOversampling(BME680_OS_8X);
+      bme.setHumidityOversampling(BME680_OS_2X);
     }
-    else
-    {
-      // Ignore start bit (0), newline (10), and carriage return (13)
-      if (byte != 0 && byte != 10 && byte != 13)
-      {
-        command += char(byte);
+
+    if (!bhExsists) {
+      Serial.println("BH1750 not found at 0x23 (try address 0x5C or check wiring)");
+    }
+
+    uint16_t lux = bhExsists ? lightMeter.readLightLevel() : 0;
+    float temperature = bmeExsists && bme.performReading() ? bme.temperature : 0.0F;
+    SDI12Send(address + "+" + String(temperature, 2) + "+" + String(lux));
+    Serial.println("Responding to TEST command");
+    return;
+  }
+
+  char inputValueCommandCharacter = input.charAt(1);
+  switch (inputValueCommandCharacter) {
+    case 'A': {
+      char newAddress = input.charAt(2);
+      bool validAddress = (newAddress >= '0' && newAddress <= '9') ||
+                          (newAddress >= 'A' && newAddress <= 'Z') ||
+                          (newAddress >= 'a' && newAddress <= 'z');
+      if (!validAddress) {
+        errorMessage();
+        return;
       }
+
+      deviceAddress = newAddress;
+      SDI12Send(String(deviceAddress));
+      Serial.print("Address changed to: ");
+      Serial.println(deviceAddress);
+      return;
     }
+
+    case 'M': {
+      bmeExsists = bme.begin(0x76);
+      bhExsists = lightMeter.begin();
+
+      if (bmeExsists) {
+        bme.setTemperatureOversampling(BME680_OS_8X);
+        bme.setPressureOversampling(BME680_OS_8X);
+        bme.setHumidityOversampling(BME680_OS_2X);
+      }
+
+      amountOfSensorsOnline = activeSensorCount();
+      String response = address + "003" + String(amountOfSensorsOnline);
+      Serial.println(response);
+      SDI12Send(response);
+      return;
+    }
+
+    case 'D': {
+        switch (input.charAt(2)){
+            case '0': {
+              // Read the light level
+              uint16_t lux = lightMeter.readLightLevel();
+
+              // Send through to SDI-12
+              SDI12Send(address + "+" + String(lux));
+
+              // Confirm response
+              Serial.println("Responding to LUX reading");
+              break;
+            }
+            case '1': {
+              // Read BME data
+              // Returns accessors temperature, humidity, pressure (kPa), and gas resistance (mOhm)
+              bme.performReading();
+
+              // Format into payload
+              String payload = address + "+" +
+                String(bme.temperature, 1) +
+                '+' + 
+                String(bme.humidity, 1) + 
+                '+' + 
+                String(bme.pressure / 100, 1) + 
+                '+' + 
+                String(bme.gas_resistance / 1000, 1);
+
+              // Pass payload into SDI-12
+              SDI12Send(payload);
+              
+              // Confirm response
+              Serial.println("Responding to BME reading");
+              break;
+            }
+            case '2': {
+              // Read sensors
+              uint16_t lux = lightMeter.readLightLevel();
+              bme.performReading();
+
+              // Format into payload
+              String payload = address + "+" +
+                String(lux) +
+                '+' +
+                String(bme.temperature, 1) + 
+                '+' + 
+                String(bme.humidity, 1) + 
+                '+' + 
+                String(bme.pressure / 100, 1) + 
+                '+' + 
+                String(bme.gas_resistance / 1000, 1);
+              
+              // Pass payload into SDI-12
+              SDI12Send(payload);
+
+              // Confirm response
+              Serial.println("Responding to sensor readings");
+              break;
+            }
+            default: {
+              errorMessage();
+              break;
+            }
+          }
+          break; }
+    case 'I':
+      errorMessage();
+      return;
+
+    default:
+      errorMessage();
+      return;
+  }
+}
+
+void loop() {
+  while (Serial1.available()) {
+    int receivedByte = Serial1.read();
+
+    if (receivedByte == '!') {
+      SDI12Receive(command);
+      command = "";
+    } else if (receivedByte != 0 && receivedByte != '\r' && receivedByte != '\n') {
+      command += static_cast<char>(receivedByte);
+    }
+  }
+}
