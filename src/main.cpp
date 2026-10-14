@@ -5,7 +5,8 @@
 #include <BH1750.h>
 #include <Wire.h>
 #include <RTClib.h>
-#include <SdFat.h>
+#include "SdFat.h"
+#include <SPI.h>
 
 
 // DEFINITIONS:
@@ -26,14 +27,21 @@ bool bhExists = false;
 bool measurementReady = false;
 
 //SD CARD SETUP:
-const uint8_t SD_CS = 10;
 SdFs sd;
 FsFile dataLOG;
-SoftSpiDriver<12, 11, 13> softSpi;
+//Chip select may be constant or RAM variable.
+const uint8_t SD_CS_PIN = A3;
+// Pin numbers in templates must be constants.
+const uint8_t SOFT_MISO_PIN = 12;
+const uint8_t SOFT_MOSI_PIN = 11;
+const uint8_t SOFT_SCK_PIN  = 13;
+
+// SdFat software SPI template
+SoftSpiDriver<SOFT_MISO_PIN, SOFT_MOSI_PIN, SOFT_SCK_PIN> softSpi;
 
 //SPECIAL SETUP:
 RTC_DS1307 rtc;
-const auto SD_CONFIG = SdSpiConfig(SD_CS, SHARED_SPI, SD_SCK_MHZ(0), &softSpi);
+#define SD_CONFIG SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(0), &softSpi)
 
 //TIME:
 long unsigned millisBefore = 0;
@@ -286,12 +294,11 @@ void setup() {
   rtc.begin();
   rtc.adjust(DateTime(2026, 9, 18, 11, 59, 50));
 
-
   Serial.println("Initializing SD card using Software SPI...");
 
   //Configure the SD card Chip Select pin.
-  pinMode(SD_CS, OUTPUT);
-  digitalWrite(SD_CS, HIGH);
+  pinMode(SD_CS_PIN, OUTPUT);
+  digitalWrite(SD_CS_PIN, HIGH);
 
   //Initialize the SD card using the Software SPI configuration.
   if (!sd.begin(SD_CONFIG)) {
@@ -310,11 +317,11 @@ void setup() {
       dataLOG.sync(); //Save the header immediately.
     }
   //Close the file when done writing.
-    flightLog.close();
+    dataLOG.close();
     
-    Serial.println(F("Test data written to FLIGHT.CSV successfully!"));
+    Serial.println(F("Test data written to LOG.CSV successfully!"));
   } else {
-    Serial.println(F("Error: Could not open FLIGHT.CSV for writing."));
+    Serial.println(F("Error: Could not open LOG.CSV for writing."));
   }
 
   Serial1.begin(1200, SERIAL_7E1);
