@@ -14,6 +14,11 @@
 // Button Configs
 const int BUTTON1_PIN = 2;
 const int BUTTON2_PIN = 3;
+const int ALERT_LED_PIN = 4;
+
+const float LIGHT_ALERT_THRESHOLD_LUX = 100.0F;
+const float HUMIDITY_ALERT_THRESHOLD_PERCENT = 80.0F;
+const float GAS_ALERT_THRESHOLD_KOHM = 100.0F;
 
 const unsigned long DEBOUNCE_MS = 50;
 
@@ -54,6 +59,10 @@ uint8_t measurementCount = 0;
 bool bmeExists = false;
 bool bhExists = false;
 bool measurementReady = false;
+bool environmentalAlert = false;
+float ambientLightLux = 0.0F;
+float humidityPercent = 0.0F;
+float gasResistanceKOhm = 0.0F;
 unsigned long previousDisplayUpdate = 0;
 const unsigned long displayInterval = 1000;
 unsigned long previousButtonDebug = 0;
@@ -73,7 +82,8 @@ SoftSpiDriver<SOFT_MISO_PIN, SOFT_MOSI_PIN, SOFT_SCK_PIN> softSpi;
 
 //SPECIAL SETUP:
 RTC_DS1307 rtc;
-#define SD_CONFIG SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(0), &softSpi)
+#define SD_CONFIG SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(4), &softSpi)
+bool sdReady = false;
 
 //TIME:
 long unsigned millisBefore = 0;
@@ -155,9 +165,12 @@ void readSensors()
 {
   measurementCount = 0;
   measurementReady = false;
+  environmentalAlert = false;
 
   if (bmeExists && bme.performReading())
   {
+    humidityPercent = bme.humidity;
+    gasResistanceKOhm = bme.gas_resistance / 1000.0F;
     measurements[measurementCount++] = String(bme.temperature, 1);
     measurements[measurementCount++] = String(bme.humidity, 1);
     measurements[measurementCount++] = String(bme.pressure / 100.0F, 1);
@@ -166,10 +179,15 @@ void readSensors()
 
   if (bhExists)
   {
-    measurements[measurementCount++] = String(lightMeter.readLightLevel(), 1);
+    ambientLightLux = lightMeter.readLightLevel();
+    measurements[measurementCount++] = String(ambientLightLux, 1);
   }
 
   measurementReady = measurementCount > 0;
+  environmentalAlert = (bhExists && ambientLightLux < LIGHT_ALERT_THRESHOLD_LUX) ||
+                       (bmeExists && humidityPercent > HUMIDITY_ALERT_THRESHOLD_PERCENT) ||
+                       (bmeExists && gasResistanceKOhm > GAS_ALERT_THRESHOLD_KOHM);
+  digitalWrite(ALERT_LED_PIN, environmentalAlert ? HIGH : LOW);
 }
 
 String measurementResponse()
@@ -361,12 +379,17 @@ void WriteDataToSD(){
   6. minute
   7. second
   */
+  readSensors();
+  ReadRTC();
+
+  if (!sdReady)
+  {
+    Serial.println("Skipping SD write: SD card is not initialized.");
+    return;
+  }
+
   FsFile dataLOG = sd.open("LOG.CSV", O_RDWR | O_CREAT | O_APPEND);
   if (dataLOG == true){
-    initializeSensors();
-    readSensors();
-    ReadRTC();
-
     dataLOG.print(measurements[0]);
     dataLOG.print(',');
     dataLOG.print(measurements[1]);
@@ -398,7 +421,8 @@ void InitialiseSDCard(){
   digitalWrite(SD_CS_PIN, HIGH);
 
   //Initialize the SD card using the Software SPI configuration.
-  if (!sd.begin(SD_CONFIG)) {
+  sdReady = sd.begin(SD_CONFIG);
+  if (!sdReady) {
     Serial.println("SD card initialization failed! Check wiring or card format (FAT32).");
     return;
   }
@@ -431,27 +455,32 @@ void displayDashboard()
   display.setCursor(5, 5);
   display.println("Sensor Dashboard");
 
-  display.setCursor(5, 25);
+  display.setCursor(5, 15);
+  display.setTextColor(environmentalAlert ? ST77XX_RED : ST77XX_GREEN);
+  display.println(environmentalAlert ? "[ALERT]" : "[OK]");
+  display.setTextColor(ST77XX_WHITE);
+
+  display.setCursor(5, 30);
   display.print("Temp: ");
   display.print(measurements[0]);
   display.println(" C");
 
-  display.setCursor(5, 35);
+  display.setCursor(5, 40);
   display.print("Humidity: ");
   display.print(measurements[1]);
   display.println(" %");
 
-  display.setCursor(5, 45);
+  display.setCursor(5, 50);
   display.print("Pressure: ");
   display.print(measurements[2]);
   display.println(" hPa");
 
-  display.setCursor(5, 55);
+  display.setCursor(5, 60);
   display.print("Gas Resistance: ");
   display.print(measurements[3]);
   display.println(" kOhm");
 
-  display.setCursor(5, 65);
+  display.setCursor(5, 70);
   display.print("Light: ");
   display.print(measurements[4]);
   display.println(" lux");
@@ -492,17 +521,19 @@ void handleButtons(){
 void setup()
 {
   Serial.begin(9600);
+  pinMode(ALERT_LED_PIN, OUTPUT);
+  digitalWrite(ALERT_LED_PIN, LOW);
   pinMode(BUTTON1_PIN, INPUT_PULLUP);
   pinMode(BUTTON2_PIN, INPUT_PULLUP);
   Wire.begin();
   scanI2C();
-  initializeSensors();
 
   //THE RTC BEGINSSSSSSS!!!!!!!!!
   rtc.begin();
   rtc.adjust(DateTime(2026, 9, 18, 11, 59, 50));
 
   InitialiseSDCard();
+  initializeSensors();
 
   Serial1.begin(1200, SERIAL_7E1);
   pinMode(DIRO, OUTPUT);
@@ -535,7 +566,6 @@ void loop()
   if (millis() - millisBefore >= interval){
     millisBefore = millis();
     WriteDataToSD();
-    String read = ReadDataSD();
   }
 
   unsigned long currentTime = millis();
