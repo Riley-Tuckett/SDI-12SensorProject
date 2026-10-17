@@ -421,7 +421,6 @@ void InitialiseSDCard(){
   }
 }
 
-void setup() {
 void displayDashboard()
 {
   display.fillScreen(ST77XX_BLACK);
