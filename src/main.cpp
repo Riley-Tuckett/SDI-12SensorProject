@@ -12,8 +12,8 @@
 
 
 // Button Configs
-const int BUTTON1_PIN = 2;
-const int BUTTON2_PIN = 3;
+const int button1Pin = 2;
+const int button2Pin = 3;
 
 const unsigned long DEBOUNCE_MS = 50;
 
@@ -472,12 +472,12 @@ bool buttonPressed(int pin,int &lastReading,int &stableState,unsigned long &last
 void handleButtons(){
 
   //Button 1: Manual logging
-  if (buttonPressed(BUTTON1_PIN,button1LastReading,button1StableState,button1LastChange)){
+  if (buttonPressed(button1Pin,button1LastReading,button1StableState,button1LastChange)){
     Serial.println("Button 1 pressed: Manual log reuested");
   }
 
   //Button 2: To toggle dashboard screen
-  if (buttonPressed(BUTTON2_PIN,button2LastReading,button2StableState,button2LastChange)){
+  if (buttonPressed(button2Pin,button2LastReading,button2StableState,button2LastChange)){
     showSystemInfo = !showSystemInfo;
 
     if (showSystemInfo){
@@ -491,8 +491,8 @@ void handleButtons(){
 void setup()
 {
   Serial.begin(9600);
-  pinMode(BUTTON1_PIN, INPUT_PULLUP);
-  pinMode(BUTTON2_PIN, INPUT_PULLUP);
+  pinMode(button1Pin, INPUT_PULLUP);
+  pinMode(button2Pin, INPUT_PULLUP);
   Wire.begin();
   scanI2C();
   initializeSensors();
