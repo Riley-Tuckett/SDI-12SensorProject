@@ -4,6 +4,9 @@
 #include <Arduino.h>
 #include <BH1750.h>
 #include <Wire.h>
+#include <RTClib.h>
+#include "SdFat.h"
+#include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
 
@@ -55,8 +58,31 @@ unsigned long previousDisplayUpdate = 0;
 const unsigned long displayInterval = 1000;
 unsigned long previousButtonDebug = 0;
 
-void scanI2C()
-{
+//SD CARD SETUP:
+SdFs sd;
+FsFile dataLOG;
+//Chip select may be constant or RAM variable.
+const uint8_t SD_CS_PIN = A3;
+// Pin numbers in templates must be constants.
+const uint8_t SOFT_MISO_PIN = 12;
+const uint8_t SOFT_MOSI_PIN = 11;
+const uint8_t SOFT_SCK_PIN  = 13;
+
+// SdFat software SPI template
+SoftSpiDriver<SOFT_MISO_PIN, SOFT_MOSI_PIN, SOFT_SCK_PIN> softSpi;
+
+//SPECIAL SETUP:
+RTC_DS1307 rtc;
+#define SD_CONFIG SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(0), &softSpi)
+
+//TIME:
+long unsigned millisBefore = 0;
+const long interval = 30000;
+int hours = 0;
+int minutes = 0;
+int seconds = 0;
+
+void scanI2C() {
   Serial.println("I2C scan:");
   for (uint8_t address = 1; address < 127; address++)
   {
@@ -73,8 +99,8 @@ void scanI2C()
   }
 }
 
-void errorMessage()
-{
+//This is a very cool error message :).
+void errorMessage() {
   Serial.println("Please return a valid response!!!");
   Serial.println("Valid Commands Include:");
   Serial.println("1. ?! - Address Query");
@@ -304,6 +330,98 @@ void SDI12Receive(String input)
   }
 }
 
+void ReadRTC(){
+  DateTime now = rtc.now();
+  hours = now.hour();
+  minutes = now.minute();
+  seconds = now.second();
+}
+
+String ReadDataSD(){
+  String fileContent = "";
+  FsFile dataLOG = sd.open("LOG.CSV", O_READ);
+  if (dataLOG == true){
+    while (dataLOG.available()) {
+      Serial.write(dataLOG.read());
+      char character = dataLOG.read();
+      fileContent += character;
+    }
+  }
+  return fileContent;
+}
+
+void WriteDataToSD(){
+  /*TYPE:
+  1. temp
+  2. humidity
+  3. gas
+  4. lux
+  5. hour
+  6. minute
+  7. second
+  */
+  FsFile dataLOG = sd.open("LOG.CSV", O_RDWR | O_CREAT | O_APPEND);
+  if (dataLOG == true){
+    initializeSensors();
+    readSensors();
+    ReadRTC();
+
+    dataLOG.print(measurements[0]);
+    dataLOG.print(',');
+    dataLOG.print(measurements[1]);
+    dataLOG.print(',');
+    dataLOG.print(measurements[2]);
+    dataLOG.print(',');
+    dataLOG.print(measurements[3]);
+    dataLOG.print(',');
+    dataLOG.print(measurements[4]);
+    dataLOG.print(',');
+    dataLOG.print(hours);
+    dataLOG.print(',');
+    dataLOG.print(minutes);
+    dataLOG.print(',');
+    dataLOG.println(seconds);
+    dataLOG.sync();
+    dataLOG.close();
+    Serial.println("Successfully wrote to SD card.");
+  } else {
+    Serial.println("Failed to open file for writing.");
+  }
+}
+
+void InitialiseSDCard(){
+  Serial.println("Initializing SD card using Software SPI...");
+
+  //Configure the SD card Chip Select pin.
+  pinMode(SD_CS_PIN, OUTPUT);
+  digitalWrite(SD_CS_PIN, HIGH);
+
+  //Initialize the SD card using the Software SPI configuration.
+  if (!sd.begin(SD_CONFIG)) {
+    Serial.println("SD card initialization failed! Check wiring or card format (FAT32).");
+    return;
+  }
+  
+  Serial.println("SD card initialized successfully!");
+
+  //Open or create "LOG.CSV" in read/write/append mode.
+  dataLOG = sd.open("LOG.CSV", O_RDWR | O_CREAT | O_APPEND);
+  if (dataLOG == true){
+    //If the file is brand new, write a CSV header row.
+    if (dataLOG.size() == 0) {
+      dataLOG.println(F("Tempurature,Humidity,Pressure,GasResistance,Lux,hourRTC,minuteRTC,secondRTC"));
+      dataLOG.sync(); //Save the header immediately.
+    }
+    //Close the file when done writing.
+    dataLOG.close();
+    
+    Serial.println(F("Test data written to LOG.CSV successfully!"));
+  } else {
+    Serial.println(F("Error: Could not open LOG.CSV for writing."));
+  }
+}
+
+void setup() {
 void displayDashboard()
 {
   display.fillScreen(ST77XX_BLACK);
@@ -380,6 +498,12 @@ void setup()
   scanI2C();
   initializeSensors();
 
+  //THE RTC BEGINSSSSSSS!!!!!!!!!
+  rtc.begin();
+  rtc.adjust(DateTime(2026, 9, 18, 11, 59, 50));
+
+  InitialiseSDCard();
+
   Serial1.begin(1200, SERIAL_7E1);
   pinMode(DIRO, OUTPUT);
   digitalWrite(DIRO, HIGH);
@@ -408,6 +532,10 @@ void loop()
       command += static_cast<char>(receivedByte);
     }
   }
+  if (millis() - millisBefore >= interval){
+    millisBefore = millis();
+    WriteDataToSD();
+    String read = ReadDataSD();
   unsigned long currentTime = millis();
   if (currentTime - previousDisplayUpdate >= displayInterval)
   {
