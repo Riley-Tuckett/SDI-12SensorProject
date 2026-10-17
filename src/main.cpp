@@ -7,7 +7,6 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
 
-
 // Button Configs
 const int BUTTON1_PIN = 2;
 const int BUTTON2_PIN = 3;
@@ -19,14 +18,13 @@ int button1LastReading = HIGH;
 int button1StableState = HIGH;
 unsigned long button1LastChange = 0;
 
-//Button 2 debounce state
+// Button 2 debounce state
 int button2LastReading = HIGH;
 int button2StableState = HIGH;
 unsigned long button2LastChange = 0;
 
 // For current dashboard screen state
-bool showSystemInfo = false;    //RUBY USE THIS VARIABLE PLS
-
+bool showSystemInfo = false; // RUBY USE THIS VARIABLE PLS
 
 // DEFINITIONS:
 #define DIRO 8
@@ -338,23 +336,38 @@ void displayDashboard()
   display.println(" lux");
 }
 
+void displaySystemInfo()
+{
+  display.fillScreen(ST77XX_BLACK);
+
+  display.setTextColor(ST77XX_WHITE);
+  display.setTextSize(1);
+  display.setCursor(5, 5);
+  display.println("System Info");
+}
+
 // Button debouncing logic
-bool buttonPressed(int pin,int &lastReading,int &stableState,unsigned long &lastChange) {
+bool buttonPressed(int pin, int &lastReading, int &stableState, unsigned long &lastChange)
+{
   int reading = digitalRead(pin);
 
   // Detect a change in the physical button signal
-  if (reading != lastReading) {
+  if (reading != lastReading)
+  {
     lastReading = reading;
     lastChange = millis();
   }
 
   // Accept the change once the signal has been stable
-  if (millis() - lastChange >= DEBOUNCE_MS) {
-    if (reading != stableState) {
+  if (millis() - lastChange >= DEBOUNCE_MS)
+  {
+    if (reading != stableState)
+    {
       stableState = reading;
 
       // INPUT_PULLUP means LOW indicates a press
-      if (stableState == LOW) {
+      if (stableState == LOW)
+      {
         return true;
       }
     }
@@ -363,22 +376,28 @@ bool buttonPressed(int pin,int &lastReading,int &stableState,unsigned long &last
   return false;
 }
 
-//Handle da buttons
-void handleButtons(){
+// Handle da buttons
+void handleButtons()
+{
 
-  //Button 1: Manual logging
-  if (buttonPressed(BUTTON1_PIN,button1LastReading,button1StableState,button1LastChange)){
+  // Button 1: Manual logging
+  if (buttonPressed(BUTTON1_PIN, button1LastReading, button1StableState, button1LastChange))
+  {
     Serial.println("Button 1 pressed: Manual log reuested");
   }
 
-  //Button 2: To toggle dashboard screen
-  if (buttonPressed(BUTTON2_PIN,button2LastReading,button2StableState,button2LastChange)){
+  // Button 2: To toggle dashboard screen
+  if (buttonPressed(BUTTON2_PIN, button2LastReading, button2StableState, button2LastChange))
+  {
     showSystemInfo = !showSystemInfo;
 
-    if (showSystemInfo){
+    if (showSystemInfo)
+    {
       Serial.println("Screen: System info");
-    } else{
-      Serial.println("Screen: LIVE DATA");  //Once we get the lcd function to change display can put in here
+    }
+    else
+    {
+      Serial.println("Screen: LIVE DATA");
     }
   }
 }
@@ -425,6 +444,14 @@ void loop()
   {
     previousDisplayUpdate = currentTime;
     readSensors();
-    displayDashboard();
+
+    if (showSystemInfo)
+    {
+      displaySystemInfo();
+    }
+    else
+    {
+      displayDashboard();
+    }
   }
 }
