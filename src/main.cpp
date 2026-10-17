@@ -46,8 +46,8 @@ RTC_DS1307 rtc;
 //TIME:
 long unsigned millisBefore = 0;
 const long interval = 30000;
-int hour = 0;
-int minute = 0;
+int hours = 0;
+int minutes = 0;
 int seconds = 0;
 
 void scanI2C() {
@@ -266,34 +266,64 @@ void SDI12Receive(String input) {
 
 void ReadRTC(){
   DateTime now = rtc.now();
-  int hours = now.hour();
-  int minutes = now.minute();
-  int seconds = now.second();
+  hours = now.hour();
+  minutes = now.minute();
+  seconds = now.second();
 }
 
-void ReadDataToSD(){
-
+String ReadDataSD(){
+  String fileContent = "";
+  FsFile dataLOG = sd.open("LOG.CSV", O_READ);
+  if (dataLOG == true){
+    while (dataLOG.available()) {
+      Serial.write(dataLOG.read());
+      char character = dataLOG.read();
+      fileContent += character;
+    }
+  }
+  return fileContent;
 }
 
 void WriteDataToSD(){
+  /*TYPE:
+  1. temp
+  2. humidity
+  3. gas
+  4. lux
+  5. hour
+  6. minute
+  7. second
+  */
+  FsFile dataLOG = sd.open("LOG.CSV", O_RDWR | O_CREAT | O_APPEND);
   if (dataLOG == true){
-    //If the file is brand new, write a CSV header row.
-    if (dataLOG.size() == 0) {
-      dataLOG.println(F("temp,humidity,gas,lux,hourRTC,minuteRTC,secondRTC"));
-      dataLOG.sync(); //Save the header immediately.
-    }
+    initializeSensors();
+    readSensors();
+    ReadRTC();
+
+    dataLOG.print(measurements[0]);
+    dataLOG.print(',');
+    dataLOG.print(measurements[1]);
+    dataLOG.print(',');
+    dataLOG.print(measurements[2]);
+    dataLOG.print(',');
+    dataLOG.print(measurements[3]);
+    dataLOG.print(',');
+    dataLOG.print(measurements[4]);
+    dataLOG.print(',');
+    dataLOG.print(hours);
+    dataLOG.print(',');
+    dataLOG.print(minutes);
+    dataLOG.print(',');
+    dataLOG.println(seconds);
+    dataLOG.sync();
+    dataLOG.close();
+    Serial.println("Successfully wrote to SD card.");
+  } else {
+    Serial.println("Failed to open file for writing.");
   }
 }
 
-void setup() {
-  Serial.begin(9600);
-  Wire.begin();
-  scanI2C();
-
-  //THE RTC BEGINSSSSSSS!!!!!!!!!
-  rtc.begin();
-  rtc.adjust(DateTime(2026, 9, 18, 11, 59, 50));
-
+void InitialiseSDCard(){
   Serial.println("Initializing SD card using Software SPI...");
 
   //Configure the SD card Chip Select pin.
@@ -313,16 +343,28 @@ void setup() {
   if (dataLOG == true){
     //If the file is brand new, write a CSV header row.
     if (dataLOG.size() == 0) {
-      dataLOG.println(F("temp,humidity,gas,lux,hourRTC,minuteRTC,secondRTC"));
+      dataLOG.println(F("Tempurature,Humidity,Pressure,GasResistance,Lux,hourRTC,minuteRTC,secondRTC"));
       dataLOG.sync(); //Save the header immediately.
     }
-  //Close the file when done writing.
+    //Close the file when done writing.
     dataLOG.close();
     
     Serial.println(F("Test data written to LOG.CSV successfully!"));
   } else {
     Serial.println(F("Error: Could not open LOG.CSV for writing."));
   }
+}
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  scanI2C();
+
+  //THE RTC BEGINSSSSSSS!!!!!!!!!
+  rtc.begin();
+  rtc.adjust(DateTime(2026, 9, 18, 11, 59, 50));
+
+  InitialiseSDCard();
 
   Serial1.begin(1200, SERIAL_7E1);
   pinMode(DIRO, OUTPUT);
@@ -340,5 +382,10 @@ void loop() {
     } else if (receivedByte != 0 && receivedByte != '\r' && receivedByte != '\n') {
       command += static_cast<char>(receivedByte);
     }
+  }
+  if (millis() - millisBefore >= interval){
+    millisBefore = millis();
+    WriteDataToSD();
+    String read = ReadDataSD();
   }
 }
