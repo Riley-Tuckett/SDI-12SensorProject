@@ -342,10 +342,11 @@ String ReadDataSD(){
   FsFile dataLOG = sd.open("LOG.CSV", O_READ);
   if (dataLOG == true){
     while (dataLOG.available()) {
-      Serial.write(dataLOG.read());
       char character = dataLOG.read();
+      Serial.write(character);
       fileContent += character;
     }
+    dataLOG.close();
   }
   return fileContent;
 }
@@ -421,7 +422,6 @@ void InitialiseSDCard(){
   }
 }
 
-void setup() {
 void displayDashboard()
 {
   display.fillScreen(ST77XX_BLACK);
@@ -536,6 +536,8 @@ void loop()
     millisBefore = millis();
     WriteDataToSD();
     String read = ReadDataSD();
+  }
+
   unsigned long currentTime = millis();
   if (currentTime - previousDisplayUpdate >= displayInterval)
   {
