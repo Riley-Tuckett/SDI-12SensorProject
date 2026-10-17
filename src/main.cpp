@@ -330,7 +330,7 @@ void setup()
   Serial.println("SDI-12 ready");
   // Sets up the screen by initalising, turning the screen landscape and clearing it
   display.initR(INITR_BLACKTAB);
-  display.setRotation(1);
+  display.setRotation(3);
   display.fillScreen(ST77XX_BLACK);
 }
 
