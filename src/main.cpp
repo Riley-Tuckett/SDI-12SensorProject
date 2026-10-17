@@ -53,6 +53,7 @@ bool bhExists = false;
 bool measurementReady = false;
 unsigned long previousDisplayUpdate = 0;
 const unsigned long displayInterval = 1000;
+unsigned long previousButtonDebug = 0;
 
 void scanI2C()
 {
@@ -341,26 +342,13 @@ void displayDashboard()
 // Button debouncing logic
 bool buttonPressed(int pin,int &lastReading,int &stableState,unsigned long &lastChange) {
   int reading = digitalRead(pin);
+  bool pressed = (lastReading == HIGH && reading == LOW);
 
-  // Detect a change in the physical button signal
-  if (reading != lastReading) {
-    lastReading = reading;
-    lastChange = millis();
-  }
+  lastReading = reading;
+  stableState = reading;
+  lastChange = millis();
 
-  // Accept the change once the signal has been stable
-  if (millis() - lastChange >= DEBOUNCE_MS) {
-    if (reading != stableState) {
-      stableState = reading;
-
-      // INPUT_PULLUP means LOW indicates a press
-      if (stableState == LOW) {
-        return true;
-      }
-    }
-  }
-
-  return false;
+  return pressed;
 }
 
 //Handle da buttons
@@ -386,6 +374,8 @@ void handleButtons(){
 void setup()
 {
   Serial.begin(9600);
+  pinMode(BUTTON1_PIN, INPUT_PULLUP);
+  pinMode(BUTTON2_PIN, INPUT_PULLUP);
   Wire.begin();
   scanI2C();
   initializeSensors();
@@ -398,8 +388,6 @@ void setup()
   display.initR(INITR_BLACKTAB);
   display.setRotation(3);
   display.fillScreen(ST77XX_BLACK);
-  pinMode(BUTTON1_PIN, INPUT_PULLUP);
-  pinMode(BUTTON2_PIN, INPUT_PULLUP);
 }
 
 void loop()
