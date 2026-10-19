@@ -9,6 +9,7 @@
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
+#include <DueTimer.h>
 
 // Button Configs
 const int BUTTON1_PIN = 2;
@@ -21,10 +22,10 @@ const float GAS_ALERT_THRESHOLD_KOHM = 100.0F;
 
 const unsigned long DEBOUNCE_MS = 50;
 
-// For button1 debounce
-int button1LastReading = HIGH;
-int button1StableState = HIGH;
-unsigned long button1LastChange = 0;
+// For button1 debounce - old polling logic
+// int button1LastReading = HIGH;
+// int button1StableState = HIGH;
+// unsigned long button1LastChange = 0;
 
 // Button 2 debounce state
 int button2LastReading = HIGH;
@@ -84,12 +85,33 @@ RTC_DS1307 rtc;
 bool sdReady = false;
 
 // TIME:
-long unsigned millisBefore = 0;
-const long interval = 30000;
+//long unsigned millisBefore = 0;
+//const long interval = 30000;
+
+//Interupt stuff timer stuff:
+volatile bool logRequested = false;
+volatile bool manualLogRequested = false;
+const unsigned long loggingInterval = 30000000UL; // 30 seconds in microseconds cos library expects it
+const unsigned long debounce = 50000UL;
+
+volatile unsigned long lastButton1Interrupt = 0;
+
 int hours = 0;
 int minutes = 0;
 int seconds = 0;
 
+void logTimerISR(){
+  logRequested = true;
+}
+
+void button1ISR(){
+  unsigned long now = micros();
+  if (now - lastButton1Interrupt >= debounce) //debounce logic
+  {
+    manualLogRequested = true;
+    lastButton1Interrupt = now;
+  }
+}
 void scanI2C()
 {
   Serial.println("I2C scan:");
@@ -578,46 +600,37 @@ void displaySystemInfo()
 bool buttonPressed(int pin, int &lastReading, int &stableState, unsigned long &lastChange)
 {
   int reading = digitalRead(pin);
-  bool pressed = (lastReading == HIGH && reading == LOW);
 
-  // Detect a change in the physical button signal
-  if (reading != lastReading)
-  {
-    lastReading = reading;
-    lastChange = millis();
-  }
+    if (reading != lastReading)
+    {
+      lastReading = reading;
+      lastChange = millis();
+    }
 
-  // Accept the change once the signal has been stable
-  if (millis() - lastChange >= DEBOUNCE_MS)
-  {
-    if (reading != stableState)
+    if (millis() - lastChange >= DEBOUNCE_MS &&
+        reading != stableState)
     {
       stableState = reading;
 
-      // INPUT_PULLUP means LOW indicates a press
       if (stableState == LOW)
       {
         return true;
       }
     }
-  }
 
-  lastReading = reading;
-  stableState = reading;
-  lastChange = millis();
-
-  return pressed;
+    return false;
 }
 
 // Handle da buttons
 void handleButtons()
 {
 
-  // Button 1: Manual logging
-  if (buttonPressed(BUTTON1_PIN, button1LastReading, button1StableState, button1LastChange))
-  {
-    Serial.println("Button 1 pressed: Manual log reuested");
-  }
+  // Button 1: Manual logging - Old polling stuff see ISR above
+  //  if (buttonPressed(BUTTON1_PIN, button1LastReading, button1StableState, button1LastChange))
+  // {
+  //   manualLogRequested = true;
+  //   Serial.println("Button 1 pressed: Manual log reuested");
+  // }
 
   // Button 2: To toggle dashboard screen
   if (buttonPressed(BUTTON2_PIN, button2LastReading, button2StableState, button2LastChange))
@@ -642,6 +655,7 @@ void setup()
   digitalWrite(ALERT_LED_PIN, LOW);
   pinMode(BUTTON1_PIN, INPUT_PULLUP);
   pinMode(BUTTON2_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(BUTTON1_PIN),button1ISR,FALLING);
   Wire.begin();
   scanI2C();
 
@@ -660,6 +674,12 @@ void setup()
   display.initR(INITR_BLACKTAB);
   display.setRotation(3);
   display.fillScreen(ST77XX_BLACK);
+
+  //Setting up da timer for data logging (periodically)
+  Timer5.attachInterrupt(logTimerISR);
+  Timer5.start(loggingInterval);
+
+  Serial.println("Hardware timer logging started for 30s interval");
 }
 
 void loop()
@@ -680,11 +700,29 @@ void loop()
       command += static_cast<char>(receivedByte);
     }
   }
-  if (millis() - millisBefore >= interval)
-  {
-    millisBefore = millis();
+
+  // Old timer code
+  // if (millis() - millisBefore >= interval)
+  // {
+  //   millisBefore = millis();
+  //   WriteDataToSD();
+  // }
+  // New timer code
+  bool scheduledLog = false;
+  bool manualLog = false;
+  noInterrupts(); //clears flags makes sure things don't break
+  manualLog = manualLogRequested;
+  manualLogRequested = false;
+  if (logRequested){
+    logRequested = false;
+    scheduledLog = true;
+  }
+  interrupts();
+
+  if(scheduledLog || manualLog){
     WriteDataToSD();
   }
+
 
   unsigned long currentTime = millis();
   if (currentTime - previousDisplayUpdate >= displayInterval)
