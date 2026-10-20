@@ -1,4 +1,4 @@
-// INCLUDES:
+//INCLUDES:
 #include <Adafruit_BME680.h>
 #include <Adafruit_Sensor.h>
 #include <Arduino.h>
@@ -10,34 +10,37 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
 
-
-// Button Configs
-const int button1Pin = 2;
-const int button2Pin = 3;
-
-const unsigned long DEBOUNCE_MS = 50;
-
-// For button1 debounce
-int button1LastReading = HIGH;
-int button1StableState = HIGH;
-unsigned long button1LastChange = 0;
-
-//Button 2 debounce state
-int button2LastReading = HIGH;
-int button2StableState = HIGH;
-unsigned long button2LastChange = 0;
-
-// For current dashboard screen state
-bool showSystemInfo = false;    //RUBY USE THIS VARIABLE PLS
-
-
-// DEFINITIONS:
+//DEFINITIONS:
 #define DIRO 8
 #define TFT_CS 10
 #define TFT_RST 6
 #define TFT_DC 7
 #define TFT_SCLK 13
 #define TFT_MOSI 11
+
+//Button Configs:
+const int button1Pin = 2;
+const int button2Pin = 3;
+const int alertLEDPin = 4;
+
+const float lightAlertThresholdLux = 100.0F;
+const float humidityAlertThresholdPercent = 80.0F;
+const float gasAlertThresholdKohm = 100.0F;
+
+const unsigned long debounceMS = 50;
+
+// For button1 debounce
+int button1LastReading = HIGH;
+int button1StableState = HIGH;
+unsigned long button1LastChange = 0;
+
+// Button 2 debounce state
+int button2LastReading = HIGH;
+int button2StableState = HIGH;
+unsigned long button2LastChange = 0;
+
+// For current dashboard screen state
+bool showSystemInfo = false; // RUBY USE THIS VARIABLE PLS
 
 Adafruit_ST7735 display = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
 
@@ -54,6 +57,10 @@ uint8_t measurementCount = 0;
 bool bmeExists = false;
 bool bhExists = false;
 bool measurementReady = false;
+bool environmentalAlert = false;
+float ambientLightLux = 0.0F;
+float humidityPercent = 0.0F;
+float gasResistanceKOhm = 0.0F;
 unsigned long previousDisplayUpdate = 0;
 const unsigned long displayInterval = 1000;
 unsigned long previousButtonDebug = 0;
@@ -73,7 +80,8 @@ SoftSpiDriver<SOFT_MISO_PIN, SOFT_MOSI_PIN, SOFT_SCK_PIN> softSpi;
 
 //SPECIAL SETUP:
 RTC_DS1307 rtc;
-#define SD_CONFIG SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(0), &softSpi)
+#define SD_CONFIG SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(4), &softSpi)
+bool sdReady = false;
 
 //TIME:
 long unsigned millisBefore = 0;
@@ -155,9 +163,12 @@ void readSensors()
 {
   measurementCount = 0;
   measurementReady = false;
+  environmentalAlert = false;
 
   if (bmeExists && bme.performReading())
   {
+    humidityPercent = bme.humidity;
+    gasResistanceKOhm = bme.gas_resistance / 1000.0F;
     measurements[measurementCount++] = String(bme.temperature, 1);
     measurements[measurementCount++] = String(bme.humidity, 1);
     measurements[measurementCount++] = String(bme.pressure / 100.0F, 1);
@@ -166,10 +177,15 @@ void readSensors()
 
   if (bhExists)
   {
-    measurements[measurementCount++] = String(lightMeter.readLightLevel(), 1);
+    ambientLightLux = lightMeter.readLightLevel();
+    measurements[measurementCount++] = String(ambientLightLux, 1);
   }
 
   measurementReady = measurementCount > 0;
+  environmentalAlert = (bhExists && ambientLightLux < lightAlertThresholdLux) ||
+                       (bmeExists && humidityPercent > humidityAlertThresholdPercent) ||
+                       (bmeExists && gasResistanceKOhm > gasAlertThresholdKohm);
+  digitalWrite(alertLEDPin, environmentalAlert ? HIGH : LOW);
 }
 
 String measurementResponse()
@@ -342,10 +358,11 @@ String ReadDataSD(){
   FsFile dataLOG = sd.open("LOG.CSV", O_READ);
   if (dataLOG == true){
     while (dataLOG.available()) {
-      Serial.write(dataLOG.read());
       char character = dataLOG.read();
+      Serial.write(character);
       fileContent += character;
     }
+    dataLOG.close();
   }
   return fileContent;
 }
@@ -360,12 +377,17 @@ void WriteDataToSD(){
   6. minute
   7. second
   */
+  readSensors();
+  ReadRTC();
+
+  if (!sdReady)
+  {
+    Serial.println("Skipping SD write: SD card is not initialized.");
+    return;
+  }
+
   FsFile dataLOG = sd.open("LOG.CSV", O_RDWR | O_CREAT | O_APPEND);
   if (dataLOG == true){
-    initializeSensors();
-    readSensors();
-    ReadRTC();
-
     dataLOG.print(measurements[0]);
     dataLOG.print(',');
     dataLOG.print(measurements[1]);
@@ -397,7 +419,8 @@ void InitialiseSDCard(){
   digitalWrite(SD_CS_PIN, HIGH);
 
   //Initialize the SD card using the Software SPI configuration.
-  if (!sd.begin(SD_CONFIG)) {
+  sdReady = sd.begin(SD_CONFIG);
+  if (!sdReady) {
     Serial.println("SD card initialization failed! Check wiring or card format (FAT32).");
     return;
   }
@@ -430,37 +453,75 @@ void displayDashboard()
   display.setCursor(5, 5);
   display.println("Sensor Dashboard");
 
-  display.setCursor(5, 25);
+  display.setCursor(5, 15);
+  display.setTextColor(environmentalAlert ? ST77XX_RED : ST77XX_GREEN);
+  display.println(environmentalAlert ? "[ALERT]" : "[OK]");
+  display.setTextColor(ST77XX_WHITE);
+
+  display.setCursor(5, 30);
   display.print("Temp: ");
   display.print(measurements[0]);
   display.println(" C");
 
-  display.setCursor(5, 35);
+  display.setCursor(5, 40);
   display.print("Humidity: ");
   display.print(measurements[1]);
   display.println(" %");
 
-  display.setCursor(5, 45);
+  display.setCursor(5, 50);
   display.print("Pressure: ");
   display.print(measurements[2]);
   display.println(" hPa");
 
-  display.setCursor(5, 55);
+  display.setCursor(5, 60);
   display.print("Gas Resistance: ");
   display.print(measurements[3]);
   display.println(" kOhm");
 
-  display.setCursor(5, 65);
+  display.setCursor(5, 70);
   display.print("Light: ");
   display.print(measurements[4]);
   display.println(" lux");
 }
 
+void displaySystemInfo()
+{
+  display.fillScreen(ST77XX_BLACK);
+
+  display.setTextColor(ST77XX_WHITE);
+  display.setTextSize(1);
+  display.setCursor(5, 5);
+  display.println("System Info");
+}
+
 // Button debouncing logic
-bool buttonPressed(int pin,int &lastReading,int &stableState,unsigned long &lastChange) {
+bool buttonPressed(int pin, int &lastReading, int &stableState, unsigned long &lastChange)
+{
   int reading = digitalRead(pin);
   bool pressed = (lastReading == HIGH && reading == LOW);
 
+  // Detect a change in the physical button signal
+  if (reading != lastReading)
+  {
+    lastReading = reading;
+    lastChange = millis();
+  }
+
+  // Accept the change once the signal has been stable
+  if (millis() - lastChange >= debounceMS)
+  {
+    if (reading != stableState)
+    {
+      stableState = reading;
+
+      // INPUT_PULLUP means LOW indicates a press
+      if (stableState == LOW)
+      {
+        return true;
+      }
+    }
+  }
+  
   lastReading = reading;
   stableState = reading;
   lastChange = millis();
@@ -468,22 +529,28 @@ bool buttonPressed(int pin,int &lastReading,int &stableState,unsigned long &last
   return pressed;
 }
 
-//Handle da buttons
-void handleButtons(){
+// Handle da buttons
+void handleButtons()
+{
 
-  //Button 1: Manual logging
-  if (buttonPressed(button1Pin,button1LastReading,button1StableState,button1LastChange)){
+  // Button 1: Manual logging
+  if (buttonPressed(button1Pin, button1LastReading, button1StableState, button1LastChange))
+  {
     Serial.println("Button 1 pressed: Manual log reuested");
   }
 
-  //Button 2: To toggle dashboard screen
-  if (buttonPressed(button2Pin,button2LastReading,button2StableState,button2LastChange)){
+  // Button 2: To toggle dashboard screen
+  if (buttonPressed(button2Pin, button2LastReading, button2StableState, button2LastChange))
+  {
     showSystemInfo = !showSystemInfo;
 
-    if (showSystemInfo){
+    if (showSystemInfo)
+    {
       Serial.println("Screen: System info");
-    } else{
-      Serial.println("Screen: LIVE DATA");  //Once we get the lcd function to change display can put in here
+    }
+    else
+    {
+      Serial.println("Screen: LIVE DATA");
     }
   }
 }
@@ -491,17 +558,19 @@ void handleButtons(){
 void setup()
 {
   Serial.begin(9600);
+  pinMode(alertLEDPin, OUTPUT);
+  digitalWrite(alertLEDPin, LOW);
   pinMode(button1Pin, INPUT_PULLUP);
   pinMode(button2Pin, INPUT_PULLUP);
   Wire.begin();
   scanI2C();
-  initializeSensors();
 
   //THE RTC BEGINSSSSSSS!!!!!!!!!
   rtc.begin();
   rtc.adjust(DateTime(2026, 9, 18, 11, 59, 50));
 
   InitialiseSDCard();
+  initializeSensors();
 
   Serial1.begin(1200, SERIAL_7E1);
   pinMode(DIRO, OUTPUT);
@@ -534,12 +603,21 @@ void loop()
   if (millis() - millisBefore >= interval){
     millisBefore = millis();
     WriteDataToSD();
-    String read = ReadDataSD();
+  }
+
   unsigned long currentTime = millis();
   if (currentTime - previousDisplayUpdate >= displayInterval)
   {
     previousDisplayUpdate = currentTime;
     readSensors();
-    displayDashboard();
+
+    if (showSystemInfo)
+    {
+      displaySystemInfo();
+    }
+    else
+    {
+      displayDashboard();
+    }
   }
 }
