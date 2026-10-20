@@ -1,4 +1,4 @@
-//INCLUDES:
+// INCLUDES:
 #include <Adafruit_BME680.h>
 #include <Adafruit_Sensor.h>
 #include <Arduino.h>
@@ -11,10 +11,15 @@
 #include <Adafruit_ST7735.h>
 
 // Button Configs
-const int button1Pin = 2;
-const int button2Pin = 3;
+const int BUTTON1_PIN = 2;
+const int BUTTON2_PIN = 3;
+const int ALERT_LED_PIN = 4;
 
-const unsigned long debounceMS = 50;
+const float LIGHT_ALERT_THRESHOLD_LUX = 100.0F;
+const float HUMIDITY_ALERT_THRESHOLD_PERCENT = 80.0F;
+const float GAS_ALERT_THRESHOLD_KOHM = 100.0F;
+
+const unsigned long DEBOUNCE_MS = 50;
 
 // For button1 debounce
 int button1LastReading = HIGH;
@@ -27,7 +32,7 @@ int button2StableState = HIGH;
 unsigned long button2LastChange = 0;
 
 // For current dashboard screen state
-bool showSystemInfo = false;    //RUBY USE THIS VARIABLE PLS
+bool showSystemInfo = false; // RUBY USE THIS VARIABLE PLS
 
 // DEFINITIONS:
 #define DIRO 8
@@ -75,7 +80,7 @@ SoftSpiDriver<SOFT_MISO_PIN, SOFT_MOSI_PIN, SOFT_SCK_PIN> softSpi;
 
 // SPECIAL SETUP:
 RTC_DS1307 rtc;
-#define sdConfig SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(4), &softSpi)
+#define SD_CONFIG SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(4), &softSpi)
 bool sdReady = false;
 
 // TIME:
@@ -179,6 +184,10 @@ void readSensors()
   }
 
   measurementReady = measurementCount > 0;
+  environmentalAlert = (bhExists && ambientLightLux < LIGHT_ALERT_THRESHOLD_LUX) ||
+                       (bmeExists && humidityPercent > HUMIDITY_ALERT_THRESHOLD_PERCENT) ||
+                       (bmeExists && gasResistanceKOhm > GAS_ALERT_THRESHOLD_KOHM);
+  digitalWrite(ALERT_LED_PIN, environmentalAlert ? HIGH : LOW);
 }
 
 String measurementResponse()
@@ -351,9 +360,10 @@ String ReadDataSD()
 {
   String fileContent = "";
   FsFile dataLOG = sd.open("LOG.CSV", O_READ);
-  if (dataLOG == true){
-    while (dataLOG.available()) {
-      Serial.write(dataLOG.read());
+  if (dataLOG == true)
+  {
+    while (dataLOG.available())
+    {
       char character = dataLOG.read();
       Serial.write(character);
       fileContent += character;
@@ -384,11 +394,8 @@ void WriteDataToSD()
   }
 
   FsFile dataLOG = sd.open("LOG.CSV", O_RDWR | O_CREAT | O_APPEND);
-  if (dataLOG == true){
-    initializeSensors();
-    readSensors();
-    ReadRTC();
-
+  if (dataLOG == true)
+  {
     dataLOG.print(measurements[0]);
     dataLOG.print(',');
     dataLOG.print(measurements[1]);
@@ -422,8 +429,10 @@ void InitialiseSDCard()
   pinMode(SD_CS_PIN, OUTPUT);
   digitalWrite(SD_CS_PIN, HIGH);
 
-  //Initialize the SD card using the Software SPI configuration.
-  if (!sd.begin(sdConfig)) {
+  // Initialize the SD card using the Software SPI configuration.
+  sdReady = sd.begin(SD_CONFIG);
+  if (!sdReady)
+  {
     Serial.println("SD card initialization failed! Check wiring or card format (FAT32).");
     return;
   }
@@ -565,21 +574,33 @@ void displaySystemInfo()
   display.setTextColor(ST77XX_WHITE);
 }
 
-void displaySystemInfo()
-{
-  display.fillScreen(ST77XX_BLACK);
-
-  display.setTextColor(ST77XX_WHITE);
-  display.setTextSize(1);
-  display.setCursor(5, 5);
-  display.println("System Info");
-}
-
 // Button debouncing logic
 bool buttonPressed(int pin, int &lastReading, int &stableState, unsigned long &lastChange)
 {
   int reading = digitalRead(pin);
   bool pressed = (lastReading == HIGH && reading == LOW);
+
+  // Detect a change in the physical button signal
+  if (reading != lastReading)
+  {
+    lastReading = reading;
+    lastChange = millis();
+  }
+
+  // Accept the change once the signal has been stable
+  if (millis() - lastChange >= DEBOUNCE_MS)
+  {
+    if (reading != stableState)
+    {
+      stableState = reading;
+
+      // INPUT_PULLUP means LOW indicates a press
+      if (stableState == LOW)
+      {
+        return true;
+      }
+    }
+  }
 
   lastReading = reading;
   stableState = reading;
@@ -592,13 +613,15 @@ bool buttonPressed(int pin, int &lastReading, int &stableState, unsigned long &l
 void handleButtons()
 {
 
-  //Button 1: Manual logging
-  if (buttonPressed(button1Pin,button1LastReading,button1StableState,button1LastChange)){
+  // Button 1: Manual logging
+  if (buttonPressed(BUTTON1_PIN, button1LastReading, button1StableState, button1LastChange))
+  {
     Serial.println("Button 1 pressed: Manual log reuested");
   }
 
-  //Button 2: To toggle dashboard screen
-  if (buttonPressed(button2Pin,button2LastReading,button2StableState,button2LastChange)){
+  // Button 2: To toggle dashboard screen
+  if (buttonPressed(BUTTON2_PIN, button2LastReading, button2StableState, button2LastChange))
+  {
     showSystemInfo = !showSystemInfo;
 
     if (showSystemInfo)
@@ -615,8 +638,10 @@ void handleButtons()
 void setup()
 {
   Serial.begin(9600);
-  pinMode(button1Pin, INPUT_PULLUP);
-  pinMode(button2Pin, INPUT_PULLUP);
+  pinMode(ALERT_LED_PIN, OUTPUT);
+  digitalWrite(ALERT_LED_PIN, LOW);
+  pinMode(BUTTON1_PIN, INPUT_PULLUP);
+  pinMode(BUTTON2_PIN, INPUT_PULLUP);
   Wire.begin();
   scanI2C();
 
