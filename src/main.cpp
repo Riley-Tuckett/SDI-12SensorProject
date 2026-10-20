@@ -10,16 +10,24 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
 
+// DEFINITIONS:
+#define DIRO 8
+#define TFT_CS 10
+#define TFT_RST 6
+#define TFT_DC 7
+#define TFT_SCLK 13
+#define TFT_MOSI 11
+
 // Button Configs
-const int BUTTON1_PIN = 2;
-const int BUTTON2_PIN = 3;
-const int ALERT_LED_PIN = 4;
+const int button1Pin = 2;
+const int button2Pin = 3;
+const int alertLEDPin = 4;
 
-const float LIGHT_ALERT_THRESHOLD_LUX = 100.0F;
-const float HUMIDITY_ALERT_THRESHOLD_PERCENT = 80.0F;
-const float GAS_ALERT_THRESHOLD_KOHM = 100.0F;
+const float lightAlertThresholdLux = 100.0F;
+const float humidityAlertThresholdPercent = 80.0F;
+const float gasAlertThresholdKohm = 100.0F;
 
-const unsigned long DEBOUNCE_MS = 50;
+const unsigned long debounceMS = 50;
 
 // For button1 debounce
 int button1LastReading = HIGH;
@@ -33,14 +41,6 @@ unsigned long button2LastChange = 0;
 
 // For current dashboard screen state
 bool showSystemInfo = false; // RUBY USE THIS VARIABLE PLS
-
-// DEFINITIONS:
-#define DIRO 8
-#define TFT_CS 10
-#define TFT_RST 6
-#define TFT_DC 7
-#define TFT_SCLK 13
-#define TFT_MOSI 11
 
 Adafruit_ST7735 display = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
 
@@ -80,7 +80,7 @@ SoftSpiDriver<SOFT_MISO_PIN, SOFT_MOSI_PIN, SOFT_SCK_PIN> softSpi;
 
 // SPECIAL SETUP:
 RTC_DS1307 rtc;
-#define SD_CONFIG SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(4), &softSpi)
+#define SDConfig SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(4), &softSpi)
 bool sdReady = false;
 
 // TIME:
@@ -184,10 +184,10 @@ void readSensors()
   }
 
   measurementReady = measurementCount > 0;
-  environmentalAlert = (bhExists && ambientLightLux < LIGHT_ALERT_THRESHOLD_LUX) ||
-                       (bmeExists && humidityPercent > HUMIDITY_ALERT_THRESHOLD_PERCENT) ||
-                       (bmeExists && gasResistanceKOhm > GAS_ALERT_THRESHOLD_KOHM);
-  digitalWrite(ALERT_LED_PIN, environmentalAlert ? HIGH : LOW);
+  environmentalAlert = (bhExists && ambientLightLux < lightAlertThresholdLux) ||
+                       (bmeExists && humidityPercent > humidityAlertThresholdPercent) ||
+                       (bmeExists && gasResistanceKOhm > gasAlertThresholdKohm);
+  digitalWrite(alertLEDPin, environmentalAlert ? HIGH : LOW);
 }
 
 String measurementResponse()
@@ -430,7 +430,7 @@ void InitialiseSDCard()
   digitalWrite(SD_CS_PIN, HIGH);
 
   // Initialize the SD card using the Software SPI configuration.
-  sdReady = sd.begin(SD_CONFIG);
+  sdReady = sd.begin(SDConfig);
   if (!sdReady)
   {
     Serial.println("SD card initialization failed! Check wiring or card format (FAT32).");
@@ -588,7 +588,7 @@ bool buttonPressed(int pin, int &lastReading, int &stableState, unsigned long &l
   }
 
   // Accept the change once the signal has been stable
-  if (millis() - lastChange >= DEBOUNCE_MS)
+  if (millis() - lastChange >= debounceMS)
   {
     if (reading != stableState)
     {
@@ -614,13 +614,13 @@ void handleButtons()
 {
 
   // Button 1: Manual logging
-  if (buttonPressed(BUTTON1_PIN, button1LastReading, button1StableState, button1LastChange))
+  if (buttonPressed(button1Pin, button1LastReading, button1StableState, button1LastChange))
   {
     Serial.println("Button 1 pressed: Manual log reuested");
   }
 
   // Button 2: To toggle dashboard screen
-  if (buttonPressed(BUTTON2_PIN, button2LastReading, button2StableState, button2LastChange))
+  if (buttonPressed(button2Pin, button2LastReading, button2StableState, button2LastChange))
   {
     showSystemInfo = !showSystemInfo;
 
@@ -638,10 +638,10 @@ void handleButtons()
 void setup()
 {
   Serial.begin(9600);
-  pinMode(ALERT_LED_PIN, OUTPUT);
-  digitalWrite(ALERT_LED_PIN, LOW);
-  pinMode(BUTTON1_PIN, INPUT_PULLUP);
-  pinMode(BUTTON2_PIN, INPUT_PULLUP);
+  pinMode(alertLEDPin, OUTPUT);
+  digitalWrite(alertLEDPin, LOW);
+  pinMode(button1Pin, INPUT_PULLUP);
+  pinMode(button2Pin, INPUT_PULLUP);
   Wire.begin();
   scanI2C();
 
