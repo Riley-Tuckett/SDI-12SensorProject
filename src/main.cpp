@@ -10,7 +10,6 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
 
-
 // Button Configs
 const int button1Pin = 2;
 const int button2Pin = 3;
@@ -29,7 +28,6 @@ unsigned long button2LastChange = 0;
 
 // For current dashboard screen state
 bool showSystemInfo = false;    //RUBY USE THIS VARIABLE PLS
-
 
 // DEFINITIONS:
 #define DIRO 8
@@ -77,7 +75,7 @@ SoftSpiDriver<SOFT_MISO_PIN, SOFT_MOSI_PIN, SOFT_SCK_PIN> softSpi;
 
 // SPECIAL SETUP:
 RTC_DS1307 rtc;
-#define SD_CONFIG SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(4), &softSpi)
+#define sdConfig SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(4), &softSpi)
 bool sdReady = false;
 
 // TIME:
@@ -425,7 +423,7 @@ void InitialiseSDCard()
   digitalWrite(SD_CS_PIN, HIGH);
 
   //Initialize the SD card using the Software SPI configuration.
-  if (!sd.begin(SD_CONFIG)) {
+  if (!sd.begin(sdConfig)) {
     Serial.println("SD card initialization failed! Check wiring or card format (FAT32).");
     return;
   }
