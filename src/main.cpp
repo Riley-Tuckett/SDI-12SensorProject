@@ -9,7 +9,6 @@
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
-#include <DueTimer.h>
 
 // Button Configs
 const int BUTTON1_PIN = 2;
@@ -22,10 +21,71 @@ const float GAS_ALERT_THRESHOLD_KOHM = 100.0F;
 
 const unsigned long DEBOUNCE_MS = 50;
 
+//Time stuff i accidentally deleted
+int hours = 0;
+int minutes = 0;
+int seconds = 0;
 // For button1 debounce - old polling logic
 // int button1LastReading = HIGH;
 // int button1StableState = HIGH;
 // unsigned long button1LastChange = 0;
+// Hardware timer logging configuration
+volatile bool logRequested = false;
+volatile uint8_t halfSecondTicks = 0;
+
+const uint32_t TIMER_RC = 41016UL; // Approximately 0.5 seconds
+const uint8_t TICKS_PER_LOG = 60;   // 60 x 0.5 seconds = 30 seconds
+
+void configureLogTimer()
+{
+  pmc_set_writeprotect(false);
+  pmc_enable_periph_clk(ID_TC5);
+
+  // TC1 channel 2 is TC5.
+  // TIMER_CLOCK5 = 84 MHz / 1024 = approximately 82,031 Hz.
+  TC_Configure(TC1,2,TC_CMR_TCCLKS_TIMER_CLOCK5 | TC_CMR_WAVE | TC_CMR_WAVSEL_UP_RC);
+
+  // 41,016 timer counts at approximately 82,031 counts/second
+  // produces an interrupt approximately every 0.5 seconds.
+  TC_SetRC(TC1, 2, TIMER_RC);
+
+  TC1->TC_CHANNEL[2].TC_IER = TC_IER_CPCS;
+  TC1->TC_CHANNEL[2].TC_IDR = ~TC_IER_CPCS;
+
+  NVIC_ClearPendingIRQ(TC5_IRQn);
+  NVIC_EnableIRQ(TC5_IRQn);
+
+  TC_Start(TC1, 2);
+}
+
+// Interrupt handler for TC5
+void TC5_Handler()
+{
+  TC_GetStatus(TC1, 2); // Clear the timer interrupt status
+
+  halfSecondTicks++;
+
+  if (halfSecondTicks >= TICKS_PER_LOG)
+  {
+    halfSecondTicks = 0;
+    logRequested = true;
+  }
+}
+volatile bool manualLogRequested = false;
+volatile bool button1EdgePending = false;
+volatile bool button1InterruptLocked = false;
+
+bool button1DebounceActive = false;
+unsigned long button1DebounceStart = 0;
+
+void button1ISR()
+{
+  if (!button1InterruptLocked)
+  {
+    button1EdgePending = true;
+    button1InterruptLocked = true;
+  }
+}
 
 // Button 2 debounce state
 int button2LastReading = HIGH;
@@ -88,30 +148,6 @@ bool sdReady = false;
 //long unsigned millisBefore = 0;
 //const long interval = 30000;
 
-//Interupt stuff timer stuff:
-volatile bool logRequested = false;
-volatile bool manualLogRequested = false;
-const unsigned long loggingInterval = 30000000UL; // 30 seconds in microseconds cos library expects it
-const unsigned long debounce = 50000UL;
-
-volatile unsigned long lastButton1Interrupt = 0;
-
-int hours = 0;
-int minutes = 0;
-int seconds = 0;
-
-void logTimerISR(){
-  logRequested = true;
-}
-
-void button1ISR(){
-  unsigned long now = micros();
-  if (now - lastButton1Interrupt >= debounce) //debounce logic
-  {
-    manualLogRequested = true;
-    lastButton1Interrupt = now;
-  }
-}
 void scanI2C()
 {
   Serial.println("I2C scan:");
@@ -648,6 +684,42 @@ void handleButtons()
   }
 }
 
+void handleButton1Interrupt()
+{
+  bool edgeDetected = false;
+
+  // Safely retrieve the event from the ISR.
+  noInterrupts();
+  if (button1EdgePending){
+    button1EdgePending = false;
+    edgeDetected = true;
+  }
+  interrupts();
+
+  if (edgeDetected){
+    button1DebounceActive = true;
+    button1DebounceStart = millis();
+  }
+
+  // Wait for the button state to settle without blocking.
+  if (button1DebounceActive && millis() - button1DebounceStart >= DEBOUNCE_MS)
+  {
+    if (digitalRead(BUTTON1_PIN) == LOW)
+    {
+      manualLogRequested = true;
+      Serial.println("Button 1 pressed: manual log requested.");
+    }
+    button1DebounceActive = false;
+  }
+
+  // Re-arm the interrupt after the button is released.
+  if (digitalRead(BUTTON1_PIN) == HIGH){
+    noInterrupts();
+    button1InterruptLocked = false;
+    interrupts();
+  }
+}
+
 void setup()
 {
   Serial.begin(9600);
@@ -676,14 +748,14 @@ void setup()
   display.fillScreen(ST77XX_BLACK);
 
   //Setting up da timer for data logging (periodically)
-  Timer5.attachInterrupt(logTimerISR);
-  Timer5.start(loggingInterval);
+  configureLogTimer();
+  Serial.println("Hardware timer logging started: 30-second interval");
 
-  Serial.println("Hardware timer logging started for 30s interval");
 }
 
 void loop()
 {
+  handleButton1Interrupt();
   handleButtons();
 
   while (Serial1.available())
@@ -723,19 +795,15 @@ void loop()
     WriteDataToSD();
   }
 
-
   unsigned long currentTime = millis();
   if (currentTime - previousDisplayUpdate >= displayInterval)
   {
     previousDisplayUpdate = currentTime;
     readSensors();
-
-    if (showSystemInfo)
-    {
+    if (showSystemInfo){
       displaySystemInfo();
     }
-    else
-    {
+    else{
       displayDashboard();
     }
   }
