@@ -10,16 +10,24 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
 
-// Button Configs
-const int BUTTON1_PIN = 2;
-const int BUTTON2_PIN = 3;
-const int ALERT_LED_PIN = 4;
+// DEFINITIONS:
+#define DIRO 8
+#define TFT_CS 10
+#define TFT_RST 6
+#define TFT_DC 7
+#define TFT_SCLK 13
+#define TFT_MOSI 11
 
-const float LIGHT_ALERT_THRESHOLD_LUX = 100.0F;
-const float HUMIDITY_ALERT_THRESHOLD_PERCENT = 80.0F;
-const float GAS_ALERT_THRESHOLD_KOHM = 100.0F;
+// Button Configs:
+const int button1Pin = 2;
+const int button2Pin = 3;
+const int alertLEDPin = 4;
 
-const unsigned long DEBOUNCE_MS = 50;
+const float lightAlertThresholdLux = 100.0F;
+const float humidityAlertThresholdPercent = 80.0F;
+const float gasAlertThresholdKohm = 100.0F;
+
+const unsigned long debounceMS = 50;
 
 // For button1 debounce
 int button1LastReading = HIGH;
@@ -33,14 +41,6 @@ unsigned long button2LastChange = 0;
 
 // For current dashboard screen state
 bool showSystemInfo = false; // RUBY USE THIS VARIABLE PLS
-
-// DEFINITIONS:
-#define DIRO 8
-#define TFT_CS 10
-#define TFT_RST 6
-#define TFT_DC 7
-#define TFT_SCLK 13
-#define TFT_MOSI 11
 
 Adafruit_ST7735 display = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
 
@@ -80,7 +80,7 @@ SoftSpiDriver<SOFT_MISO_PIN, SOFT_MOSI_PIN, SOFT_SCK_PIN> softSpi;
 
 // SPECIAL SETUP:
 RTC_DS1307 rtc;
-#define SD_CONFIG SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(4), &softSpi)
+#define SDConfig SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(4), &softSpi)
 bool sdReady = false;
 
 // TIME:
@@ -89,6 +89,36 @@ const long interval = 30000;
 int hours = 0;
 int minutes = 0;
 int seconds = 0;
+
+//SENSOR SAMPLING INTERRUPT && AVERAGE SAMPLING :
+volatile bool isTimerForSensorSamplingTriggered = false; //50 ms timer flag for TC4.
+class AverageSamplingClass {
+  public:
+    float tempSamples[10];
+    float humiditySamples[10];
+    float pressureSamples[10];
+    float gasSamples[10];
+    float luxSamples[10];
+    int bmeIndex = 0;
+    int bmeSampleCount = 0;
+    int luxIndex = 0;
+    int luxSampleCount = 0;
+  AverageSamplingClass() : 
+      tempSamples{0}, 
+      humiditySamples{0}, 
+      pressureSamples{0}, 
+      gasSamples{0}, 
+      luxSamples{0},
+      bmeIndex(0),
+      bmeSampleCount(0),
+      luxIndex(0),
+      luxSampleCount(0)
+    {}
+};
+AverageSamplingClass sensorSampler;
+float averageSampleValues[5];
+bool bmeValid = false;
+bool bhValid = false;
 
 void scanI2C()
 {
@@ -166,6 +196,8 @@ void readSensors()
   measurementCount = 0;
   measurementReady = false;
   environmentalAlert = false;
+  bmeValid = false;
+  bhValid = false;
 
   if (bmeExists && bme.performReading())
   {
@@ -175,19 +207,23 @@ void readSensors()
     measurements[measurementCount++] = String(bme.humidity, 1);
     measurements[measurementCount++] = String(bme.pressure / 100.0F, 1);
     measurements[measurementCount++] = String(bme.gas_resistance / 1000.0F, 1);
+    
+    bmeValid = true;
   }
 
   if (bhExists)
   {
     ambientLightLux = lightMeter.readLightLevel();
     measurements[measurementCount++] = String(ambientLightLux, 1);
+
+    bhValid = true;
   }
 
   measurementReady = measurementCount > 0;
-  environmentalAlert = (bhExists && ambientLightLux < LIGHT_ALERT_THRESHOLD_LUX) ||
-                       (bmeExists && humidityPercent > HUMIDITY_ALERT_THRESHOLD_PERCENT) ||
-                       (bmeExists && gasResistanceKOhm > GAS_ALERT_THRESHOLD_KOHM);
-  digitalWrite(ALERT_LED_PIN, environmentalAlert ? HIGH : LOW);
+  environmentalAlert = (bhExists && ambientLightLux < lightAlertThresholdLux) ||
+                       (bmeExists && humidityPercent > humidityAlertThresholdPercent) ||
+                       (bmeExists && gasResistanceKOhm > gasAlertThresholdKohm);
+  digitalWrite(alertLEDPin, environmentalAlert ? HIGH : LOW);
 }
 
 String measurementResponse()
@@ -430,7 +466,7 @@ void InitialiseSDCard()
   digitalWrite(SD_CS_PIN, HIGH);
 
   // Initialize the SD card using the Software SPI configuration.
-  sdReady = sd.begin(SD_CONFIG);
+  sdReady = sd.begin(SDConfig);
   if (!sdReady)
   {
     Serial.println("SD card initialization failed! Check wiring or card format (FAT32).");
@@ -588,7 +624,7 @@ bool buttonPressed(int pin, int &lastReading, int &stableState, unsigned long &l
   }
 
   // Accept the change once the signal has been stable
-  if (millis() - lastChange >= DEBOUNCE_MS)
+  if (millis() - lastChange >= debounceMS)
   {
     if (reading != stableState)
     {
@@ -614,13 +650,13 @@ void handleButtons()
 {
 
   // Button 1: Manual logging
-  if (buttonPressed(BUTTON1_PIN, button1LastReading, button1StableState, button1LastChange))
+  if (buttonPressed(button1Pin, button1LastReading, button1StableState, button1LastChange))
   {
     Serial.println("Button 1 pressed: Manual log reuested");
   }
 
   // Button 2: To toggle dashboard screen
-  if (buttonPressed(BUTTON2_PIN, button2LastReading, button2StableState, button2LastChange))
+  if (buttonPressed(button2Pin, button2LastReading, button2StableState, button2LastChange))
   {
     showSystemInfo = !showSystemInfo;
 
@@ -635,13 +671,104 @@ void handleButtons()
   }
 }
 
+void InitialiseHardwareTimerForSensorSampling() {
+  pmc_set_writeprotect(false);
+  pmc_enable_periph_clk((uint32_t)TC4_IRQn);
+  
+  //Configure TC in waveform mode, up-count on RC match, using TIMER_CLOCK4 (MCK/128).
+  TC_Configure(TC1, 1, TC_CMR_WAVE | TC_CMR_WAVSEL_UP_RC | TC_CMR_TCCLKS_TIMER_CLOCK4);
+  
+  uint32_t rc = VARIANT_MCK / 128 / 20; //20 Hz = 50 ms interval.
+  TC_SetRC(TC1, 1, rc);
+  
+  // Enable Interrupt on RC Compare.
+  TC1->TC_CHANNEL[1].TC_IER = TC_IER_CPCS;
+  TC1->TC_CHANNEL[1].TC_IDR = ~TC_IER_CPCS;
+  
+  NVIC_EnableIRQ(TC4_IRQn);
+  TC_Start(TC1, 1);
+}
+
+void TC4_Handler() {
+  //Clear status register for TC1 Channel 1 to acknowledge interrupt.
+  TC_GetStatus(TC1, 1);
+  
+  //Set flag for main loop processing.
+  isTimerForSensorSamplingTriggered = true;
+}
+
+void AverageSensorSample(){
+  //Read the sensors.
+  readSensors();
+  //If the bme exsists and it is performing readings start doing averages.
+  if (bmeExists && bmeValid) {
+    //Gets the sensor, identify where it is indexing, or updating the value and change it.
+    //The index highlights the oldest value in the meaurement cycle relative to where it is in the array.
+    sensorSampler.tempSamples[sensorSampler.bmeIndex] = measurements[0].toFloat();
+    sensorSampler.humiditySamples[sensorSampler.bmeIndex] = measurements[1].toFloat();
+    sensorSampler.pressureSamples[sensorSampler.bmeIndex] = measurements[2].toFloat();
+    sensorSampler.gasSamples[sensorSampler.bmeIndex] = measurements[3].toFloat();
+
+    //Increases the position, to the new oldest value, and resets it to 0 once it gets to 10.
+    sensorSampler.bmeIndex = (sensorSampler.bmeIndex + 1) % 10;
+    
+    //Track the amount of samples there are.
+    if (sensorSampler.bmeSampleCount < 10) {
+      sensorSampler.bmeSampleCount++;
+    }
+
+    //Calculate the totals of each sensor value.
+    float sumTemp = 0, sumHum = 0, sumPres = 0, sumGas = 0;
+    for (int i = 0; i < sensorSampler.bmeSampleCount; i++) {
+      sumTemp += sensorSampler.tempSamples[i];
+      sumHum += sensorSampler.humiditySamples[i];
+      sumPres += sensorSampler.pressureSamples[i];
+      sumGas += sensorSampler.gasSamples[i];
+    }
+
+    //Calculate the average.
+    if (sensorSampler.bmeSampleCount > 0) {
+      averageSampleValues[0] = sumTemp / sensorSampler.bmeSampleCount;
+      averageSampleValues[1] = sumHum / sensorSampler.bmeSampleCount;
+      averageSampleValues[2] = sumPres / sensorSampler.bmeSampleCount;
+      averageSampleValues[3] = sumGas / sensorSampler.bmeSampleCount;
+    }
+  }
+
+  //If the bh exsists and it is performing readings start doing averages.
+  if (bhExists && bhValid) {
+    //Gets the sensor, identify where it is indexing, or updating the value and change it.
+    //The index highlights the oldest value in the meaurement cycle relative to where it is in the array.
+    sensorSampler.luxSamples[sensorSampler.luxIndex] = measurements[4].toFloat();
+
+    //Increases the position, to the new oldest value, and resets it to 0 once it gets to 10.
+    sensorSampler.luxIndex = (sensorSampler.luxIndex + 1) % 10;
+    
+    //Track the amount of samples there are.
+    if (sensorSampler.luxSampleCount < 10) {
+      sensorSampler.luxSampleCount++;
+    }
+
+    //Calculate the totals of each sensor value.
+    float sumLux = 0;
+    for (int i = 0; i < sensorSampler.luxSampleCount; i++) {
+      sumLux += sensorSampler.luxSamples[i];
+    }
+
+    //Calculate the average.
+    if (sensorSampler.luxSampleCount > 0) {
+      averageSampleValues[4] = sumLux / sensorSampler.luxSampleCount;
+    }
+  }
+}
+
 void setup()
 {
   Serial.begin(9600);
-  pinMode(ALERT_LED_PIN, OUTPUT);
-  digitalWrite(ALERT_LED_PIN, LOW);
-  pinMode(BUTTON1_PIN, INPUT_PULLUP);
-  pinMode(BUTTON2_PIN, INPUT_PULLUP);
+  pinMode(alertLEDPin, OUTPUT);
+  digitalWrite(alertLEDPin, LOW);
+  pinMode(button1Pin, INPUT_PULLUP);
+  pinMode(button2Pin, INPUT_PULLUP);
   Wire.begin();
   scanI2C();
 
@@ -651,6 +778,9 @@ void setup()
 
   InitialiseSDCard();
   initializeSensors();
+
+  //Interrupt Setup:
+  InitialiseHardwareTimerForSensorSampling();
 
   Serial1.begin(1200, SERIAL_7E1);
   pinMode(DIRO, OUTPUT);
@@ -664,6 +794,18 @@ void setup()
 
 void loop()
 {
+  if (isTimerForSensorSamplingTriggered) {
+    noInterrupts();
+    isTimerForSensorSamplingTriggered = false;
+    interrupts();
+
+    AverageSensorSample();
+    //For Testing!!!!
+    for (int i = 0; i < 5; i++){
+      Serial.println(averageSampleValues[i]);
+    }
+  }
+
   handleButtons();
 
   while (Serial1.available())
