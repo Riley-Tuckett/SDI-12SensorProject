@@ -12,7 +12,7 @@ constexpr uint8_t TFT_MOSI = 11;
 constexpr uint8_t button1Pin = 2;
 constexpr uint8_t button2Pin = 3;
 constexpr uint8_t alertLEDPin = 4;
-constexpr uint8_t SDI_12_STATUS_LED_PIN = 9;
+constexpr uint8_t SDI_12_STATUS_LED_PIN = 5;
 
 constexpr float lightAlertThresholdLux = 100.0F;
 constexpr float humidityAlertThresholdPercent = 80.0F;
