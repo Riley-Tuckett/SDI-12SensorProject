@@ -10,26 +10,31 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
 
-// Button Configs
-const int BUTTON1_PIN = 2;
-const int BUTTON2_PIN = 3;
-const int ALERT_LED_PIN = 4;
+// DEFINITIONS:
+#define DIRO 8
+#define TFT_CS 10
+#define TFT_RST 6
+#define TFT_DC 7
+#define TFT_SCLK 13
+#define TFT_MOSI 11
 
-const float LIGHT_ALERT_THRESHOLD_LUX = 100.0F;
-const float HUMIDITY_ALERT_THRESHOLD_PERCENT = 80.0F;
-const float GAS_ALERT_THRESHOLD_KOHM = 100.0F;
+// Button Configs:
+const int button1Pin = 2;
+const int button2Pin = 3;
+const int alertLEDPin = 4;
 
-const unsigned long DEBOUNCE_MS = 50;
+const float lightAlertThresholdLux = 100.0F;
+const float humidityAlertThresholdPercent = 80.0F;
+const float gasAlertThresholdKohm = 100.0F;
 
-//Time stuff i accidentally deleted
+const unsigned long debounceMS = 50;
+
+// Time variables
 int hours = 0;
 int minutes = 0;
 int seconds = 0;
-// For button1 debounce - old polling logic
-// int button1LastReading = HIGH;
-// int button1StableState = HIGH;
-// unsigned long button1LastChange = 0;
-// Hardware timer logging configuration
+
+// Hardware timer logging configuration (Nathan-Branch timer for 30s logs)
 volatile bool logRequested = false;
 volatile uint8_t halfSecondTicks = 0;
 
@@ -43,10 +48,8 @@ void configureLogTimer()
 
   // TC1 channel 2 is TC5.
   // TIMER_CLOCK5 = 84 MHz / 1024 = approximately 82,031 Hz.
-  TC_Configure(TC1,2,TC_CMR_TCCLKS_TIMER_CLOCK5 | TC_CMR_WAVE | TC_CMR_WAVSEL_UP_RC);
+  TC_Configure(TC1, 2, TC_CMR_TCCLKS_TIMER_CLOCK5 | TC_CMR_WAVE | TC_CMR_WAVSEL_UP_RC);
 
-  // 41,016 timer counts at approximately 82,031 counts/second
-  // produces an interrupt approximately every 0.5 seconds.
   TC_SetRC(TC1, 2, TIMER_RC);
 
   TC1->TC_CHANNEL[2].TC_IER = TC_IER_CPCS;
@@ -58,7 +61,7 @@ void configureLogTimer()
   TC_Start(TC1, 2);
 }
 
-// Interrupt handler for TC5
+// Interrupt handler for TC5 (Logging interval)
 void TC5_Handler()
 {
   TC_GetStatus(TC1, 2); // Clear the timer interrupt status
@@ -71,6 +74,7 @@ void TC5_Handler()
     logRequested = true;
   }
 }
+
 volatile bool manualLogRequested = false;
 volatile bool button1EdgePending = false;
 volatile bool button1InterruptLocked = false;
@@ -94,14 +98,6 @@ unsigned long button2LastChange = 0;
 
 // For current dashboard screen state
 bool showSystemInfo = false; // RUBY USE THIS VARIABLE PLS
-
-// DEFINITIONS:
-#define DIRO 8
-#define TFT_CS 10
-#define TFT_RST 6
-#define TFT_DC 7
-#define TFT_SCLK 13
-#define TFT_MOSI 11
 
 Adafruit_ST7735 display = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
 
@@ -129,24 +125,47 @@ unsigned long previousButtonDebug = 0;
 // SD CARD SETUP:
 SdFs sd;
 FsFile dataLOG;
-// Chip select may be constant or RAM variable.
 const uint8_t SD_CS_PIN = A3;
-// Pin numbers in templates must be constants.
 const uint8_t SOFT_MISO_PIN = 12;
 const uint8_t SOFT_MOSI_PIN = 11;
 const uint8_t SOFT_SCK_PIN = 13;
 
-// SdFat software SPI template
 SoftSpiDriver<SOFT_MISO_PIN, SOFT_MOSI_PIN, SOFT_SCK_PIN> softSpi;
 
 // SPECIAL SETUP:
 RTC_DS1307 rtc;
-#define SD_CONFIG SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(4), &softSpi)
+#define SDConfig SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(4), &softSpi)
 bool sdReady = false;
 
-// TIME:
-//long unsigned millisBefore = 0;
-//const long interval = 30000;
+// SENSOR SAMPLING INTERRUPT && AVERAGE SAMPLING (Main branch):
+volatile bool isTimerForSensorSamplingTriggered = false; // 50 ms timer flag for TC4.
+class AverageSamplingClass {
+  public:
+    float tempSamples[10];
+    float humiditySamples[10];
+    float pressureSamples[10];
+    float gasSamples[10];
+    float luxSamples[10];
+    int bmeIndex = 0;
+    int bmeSampleCount = 0;
+    int luxIndex = 0;
+    int luxSampleCount = 0;
+  AverageSamplingClass() : 
+      tempSamples{0}, 
+      humiditySamples{0}, 
+      pressureSamples{0}, 
+      gasSamples{0}, 
+      luxSamples{0},
+      bmeIndex(0),
+      bmeSampleCount(0),
+      luxIndex(0),
+      luxSampleCount(0)
+    {}
+};
+AverageSamplingClass sensorSampler;
+float averageSampleValues[5];
+bool bmeValid = false;
+bool bhValid = false;
 
 void scanI2C()
 {
@@ -166,7 +185,6 @@ void scanI2C()
   }
 }
 
-// This is a very cool error message :).
 void errorMessage()
 {
   Serial.println("Please return a valid response!!!");
@@ -224,6 +242,8 @@ void readSensors()
   measurementCount = 0;
   measurementReady = false;
   environmentalAlert = false;
+  bmeValid = false;
+  bhValid = false;
 
   if (bmeExists && bme.performReading())
   {
@@ -233,19 +253,23 @@ void readSensors()
     measurements[measurementCount++] = String(bme.humidity, 1);
     measurements[measurementCount++] = String(bme.pressure / 100.0F, 1);
     measurements[measurementCount++] = String(bme.gas_resistance / 1000.0F, 1);
+    
+    bmeValid = true;
   }
 
   if (bhExists)
   {
     ambientLightLux = lightMeter.readLightLevel();
     measurements[measurementCount++] = String(ambientLightLux, 1);
+
+    bhValid = true;
   }
 
   measurementReady = measurementCount > 0;
-  environmentalAlert = (bhExists && ambientLightLux < LIGHT_ALERT_THRESHOLD_LUX) ||
-                       (bmeExists && humidityPercent > HUMIDITY_ALERT_THRESHOLD_PERCENT) ||
-                       (bmeExists && gasResistanceKOhm > GAS_ALERT_THRESHOLD_KOHM);
-  digitalWrite(ALERT_LED_PIN, environmentalAlert ? HIGH : LOW);
+  environmentalAlert = (bhExists && ambientLightLux < lightAlertThresholdLux) ||
+                       (bmeExists && humidityPercent > humidityAlertThresholdPercent) ||
+                       (bmeExists && gasResistanceKOhm > gasAlertThresholdKohm);
+  digitalWrite(alertLEDPin, environmentalAlert ? HIGH : LOW);
 }
 
 String measurementResponse()
@@ -268,7 +292,6 @@ void SDI12Receive(String input)
   Serial.print("Received SDI-12 command: ");
   Serial.println(input);
 
-  // The receive loop removes !, so ?! arrives as "?".
   if (input == "?")
   {
     SDI12Send(String(deviceAddress));
@@ -285,7 +308,6 @@ void SDI12Receive(String input)
 
   switch (commandType)
   {
-  // Change address: aAb!
   case 'A':
   {
     if (input.length() != 3)
@@ -311,7 +333,6 @@ void SDI12Receive(String input)
     return;
   }
 
-  // Start measurement: aM!
   case 'M':
   {
     if (input.length() != 2)
@@ -322,7 +343,6 @@ void SDI12Receive(String input)
 
     initializeSensors();
     readSensors();
-    // Measurements are read immediately; 002 gives the host time to process the response.
     String response = String(deviceAddress) + "002";
     if (measurementCount < 10)
     {
@@ -333,7 +353,6 @@ void SDI12Receive(String input)
     return;
   }
 
-  // Send data: aD0! through aD9!
   case 'D':
   {
     if (input.length() != 3 || input.charAt(2) < '0' || input.charAt(2) > '9')
@@ -390,7 +409,6 @@ void SDI12Receive(String input)
     }
   }
 
-  // Send identification: aI!
   case 'I':
     if (input.length() != 2)
     {
@@ -433,15 +451,6 @@ String ReadDataSD()
 
 void WriteDataToSD()
 {
-  /*TYPE:
-  1. temp
-  2. humidity
-  3. gas
-  4. lux
-  5. hour
-  6. minute
-  7. second
-  */
   readSensors();
   ReadRTC();
 
@@ -483,12 +492,10 @@ void InitialiseSDCard()
 {
   Serial.println("Initializing SD card using Software SPI...");
 
-  // Configure the SD card Chip Select pin.
   pinMode(SD_CS_PIN, OUTPUT);
   digitalWrite(SD_CS_PIN, HIGH);
 
-  // Initialize the SD card using the Software SPI configuration.
-  sdReady = sd.begin(SD_CONFIG);
+  sdReady = sd.begin(SDConfig);
   if (!sdReady)
   {
     Serial.println("SD card initialization failed! Check wiring or card format (FAT32).");
@@ -497,17 +504,14 @@ void InitialiseSDCard()
 
   Serial.println("SD card initialized successfully!");
 
-  // Open or create "LOG.CSV" in read/write/append mode.
   dataLOG = sd.open("LOG.CSV", O_RDWR | O_CREAT | O_APPEND);
   if (dataLOG == true)
   {
-    // If the file is brand new, write a CSV header row.
     if (dataLOG.size() == 0)
     {
       dataLOG.println(F("Tempurature,Humidity,Pressure,GasResistance,Lux,hourRTC,minuteRTC,secondRTC"));
-      dataLOG.sync(); // Save the header immediately.
+      dataLOG.sync();
     }
-    // Close the file when done writing.
     dataLOG.close();
 
     Serial.println(F("Test data written to LOG.CSV successfully!"));
@@ -636,15 +640,17 @@ void displaySystemInfo()
 bool buttonPressed(int pin, int &lastReading, int &stableState, unsigned long &lastChange)
 {
   int reading = digitalRead(pin);
+  bool pressed = (lastReading == HIGH && reading == LOW);
 
-    if (reading != lastReading)
-    {
-      lastReading = reading;
-      lastChange = millis();
-    }
+  if (reading != lastReading)
+  {
+    lastReading = reading;
+    lastChange = millis();
+  }
 
-    if (millis() - lastChange >= DEBOUNCE_MS &&
-        reading != stableState)
+  if (millis() - lastChange >= debounceMS)
+  {
+    if (reading != stableState)
     {
       stableState = reading;
 
@@ -653,23 +659,20 @@ bool buttonPressed(int pin, int &lastReading, int &stableState, unsigned long &l
         return true;
       }
     }
+  }
 
-    return false;
+  lastReading = reading;
+  stableState = reading;
+  lastChange = millis();
+
+  return pressed;
 }
 
-// Handle da buttons
+// Handle buttons
 void handleButtons()
 {
-
-  // Button 1: Manual logging - Old polling stuff see ISR above
-  //  if (buttonPressed(BUTTON1_PIN, button1LastReading, button1StableState, button1LastChange))
-  // {
-  //   manualLogRequested = true;
-  //   Serial.println("Button 1 pressed: Manual log reuested");
-  // }
-
   // Button 2: To toggle dashboard screen
-  if (buttonPressed(BUTTON2_PIN, button2LastReading, button2StableState, button2LastChange))
+  if (buttonPressed(button2Pin, button2LastReading, button2StableState, button2LastChange))
   {
     showSystemInfo = !showSystemInfo;
 
@@ -684,11 +687,81 @@ void handleButtons()
   }
 }
 
+void InitialiseHardwareTimerForSensorSampling() {
+  pmc_set_writeprotect(false);
+  pmc_enable_periph_clk((uint32_t)TC4_IRQn);
+  
+  TC_Configure(TC1, 1, TC_CMR_WAVE | TC_CMR_WAVSEL_UP_RC | TC_CMR_TCCLKS_TIMER_CLOCK4);
+  
+  uint32_t rc = VARIANT_MCK / 128 / 20; // 20 Hz = 50 ms interval.
+  TC_SetRC(TC1, 1, rc);
+  
+  TC1->TC_CHANNEL[1].TC_IER = TC_IER_CPCS;
+  TC1->TC_CHANNEL[1].TC_IDR = ~TC_IER_CPCS;
+  
+  NVIC_EnableIRQ(TC4_IRQn);
+  TC_Start(TC1, 1);
+}
+
+void TC4_Handler() {
+  TC_GetStatus(TC1, 1);
+  isTimerForSensorSamplingTriggered = true;
+}
+
+void AverageSensorSample() {
+  readSensors();
+  if (bmeExists && bmeValid) {
+    sensorSampler.tempSamples[sensorSampler.bmeIndex] = measurements[0].toFloat();
+    sensorSampler.humiditySamples[sensorSampler.bmeIndex] = measurements[1].toFloat();
+    sensorSampler.pressureSamples[sensorSampler.bmeIndex] = measurements[2].toFloat();
+    sensorSampler.gasSamples[sensorSampler.bmeIndex] = measurements[3].toFloat();
+
+    sensorSampler.bmeIndex = (sensorSampler.bmeIndex + 1) % 10;
+    
+    if (sensorSampler.bmeSampleCount < 10) {
+      sensorSampler.bmeSampleCount++;
+    }
+
+    float sumTemp = 0, sumHum = 0, sumPres = 0, sumGas = 0;
+    for (int i = 0; i < sensorSampler.bmeSampleCount; i++) {
+      sumTemp += sensorSampler.tempSamples[i];
+      sumHum += sensorSampler.humiditySamples[i];
+      sumPres += sensorSampler.pressureSamples[i];
+      sumGas += sensorSampler.gasSamples[i];
+    }
+
+    if (sensorSampler.bmeSampleCount > 0) {
+      averageSampleValues[0] = sumTemp / sensorSampler.bmeSampleCount;
+      averageSampleValues[1] = sumHum / sensorSampler.bmeSampleCount;
+      averageSampleValues[2] = sumPres / sensorSampler.bmeSampleCount;
+      averageSampleValues[3] = sumGas / sensorSampler.bmeSampleCount;
+    }
+  }
+
+  if (bhExists && bhValid) {
+    sensorSampler.luxSamples[sensorSampler.luxIndex] = measurements[4].toFloat();
+
+    sensorSampler.luxIndex = (sensorSampler.luxIndex + 1) % 10;
+    
+    if (sensorSampler.luxSampleCount < 10) {
+      sensorSampler.luxSampleCount++;
+    }
+
+    float sumLux = 0;
+    for (int i = 0; i < sensorSampler.luxSampleCount; i++) {
+      sumLux += sensorSampler.luxSamples[i];
+    }
+
+    if (sensorSampler.luxSampleCount > 0) {
+      averageSampleValues[4] = sumLux / sensorSampler.luxSampleCount;
+    }
+  }
+}
+
 void handleButton1Interrupt()
 {
   bool edgeDetected = false;
 
-  // Safely retrieve the event from the ISR.
   noInterrupts();
   if (button1EdgePending){
     button1EdgePending = false;
@@ -701,10 +774,9 @@ void handleButton1Interrupt()
     button1DebounceStart = millis();
   }
 
-  // Wait for the button state to settle without blocking.
-  if (button1DebounceActive && millis() - button1DebounceStart >= DEBOUNCE_MS)
+  if (button1DebounceActive && millis() - button1DebounceStart >= debounceMS)
   {
-    if (digitalRead(BUTTON1_PIN) == LOW)
+    if (digitalRead(button1Pin) == LOW)
     {
       manualLogRequested = true;
       Serial.println("Button 1 pressed: manual log requested.");
@@ -712,8 +784,7 @@ void handleButton1Interrupt()
     button1DebounceActive = false;
   }
 
-  // Re-arm the interrupt after the button is released.
-  if (digitalRead(BUTTON1_PIN) == HIGH){
+  if (digitalRead(button1Pin) == HIGH){
     noInterrupts();
     button1InterruptLocked = false;
     interrupts();
@@ -723,39 +794,48 @@ void handleButton1Interrupt()
 void setup()
 {
   Serial.begin(9600);
-  pinMode(ALERT_LED_PIN, OUTPUT);
-  digitalWrite(ALERT_LED_PIN, LOW);
-  pinMode(BUTTON1_PIN, INPUT_PULLUP);
-  pinMode(BUTTON2_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(BUTTON1_PIN),button1ISR,FALLING);
+  pinMode(alertLEDPin, OUTPUT);
+  digitalWrite(alertLEDPin, LOW);
+  pinMode(button1Pin, INPUT_PULLUP);
+  pinMode(button2Pin, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(button1Pin), button1ISR, FALLING);
+  
   Wire.begin();
   scanI2C();
 
-  // THE RTC BEGINSSSSSSS!!!!!!!!!
   rtc.begin();
   rtc.adjust(DateTime(2026, 9, 18, 11, 59, 50));
 
   InitialiseSDCard();
   initializeSensors();
 
+  InitialiseHardwareTimerForSensorSampling();
+
   Serial1.begin(1200, SERIAL_7E1);
   pinMode(DIRO, OUTPUT);
   digitalWrite(DIRO, HIGH);
   Serial.println("SDI-12 ready");
-  // Sets up the screen by initalising, turning the screen landscape and clearing it
+  
   display.initR(INITR_BLACKTAB);
   display.setRotation(3);
   display.fillScreen(ST77XX_BLACK);
 
-  //Setting up da timer for data logging (periodically)
   configureLogTimer();
   Serial.println("Hardware timer logging started: 30-second interval");
-
 }
 
 void loop()
 {
   handleButton1Interrupt();
+
+  if (isTimerForSensorSamplingTriggered) {
+    noInterrupts();
+    isTimerForSensorSamplingTriggered = false;
+    interrupts();
+
+    AverageSensorSample();
+  }
+
   handleButtons();
 
   while (Serial1.available())
@@ -773,16 +853,9 @@ void loop()
     }
   }
 
-  // Old timer code
-  // if (millis() - millisBefore >= interval)
-  // {
-  //   millisBefore = millis();
-  //   WriteDataToSD();
-  // }
-  // New timer code
   bool scheduledLog = false;
   bool manualLog = false;
-  noInterrupts(); //clears flags makes sure things don't break
+  noInterrupts();
   manualLog = manualLogRequested;
   manualLogRequested = false;
   if (logRequested){
@@ -791,7 +864,7 @@ void loop()
   }
   interrupts();
 
-  if(scheduledLog || manualLog){
+  if (scheduledLog || manualLog){
     WriteDataToSD();
   }
 
@@ -800,10 +873,13 @@ void loop()
   {
     previousDisplayUpdate = currentTime;
     readSensors();
-    if (showSystemInfo){
+
+    if (showSystemInfo)
+    {
       displaySystemInfo();
     }
-    else{
+    else
+    {
       displayDashboard();
     }
   }
