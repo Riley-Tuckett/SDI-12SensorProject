@@ -44,8 +44,19 @@ void initializeButtons()
 {
   pinMode(button1Pin, INPUT_PULLUP);
   pinMode(button2Pin, INPUT_PULLUP);
+  button1InterruptLocked = digitalRead(button1Pin) == LOW;
+  button2InterruptLocked = digitalRead(button2Pin) == LOW;
+  button1EdgePending = false;
+  button2EdgePending = false;
   attachInterrupt(digitalPinToInterrupt(button1Pin), button1Isr, CHANGE);
   attachInterrupt(digitalPinToInterrupt(button2Pin), button2Isr, CHANGE);
+
+  noInterrupts();
+  button1EdgePending = false;
+  button2EdgePending = false;
+  button1InterruptLocked = digitalRead(button1Pin) == LOW;
+  button2InterruptLocked = digitalRead(button2Pin) == LOW;
+  interrupts();
 }
 
 void handleButton1Interrupt()

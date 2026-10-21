@@ -18,6 +18,7 @@ namespace
 }
 
 bool sdReady = false;
+int cachedLogCount = 0;
 uint32_t cachedFreeStorageMegabytes = 0;
 
 void readRtc()
@@ -74,6 +75,7 @@ void writeDataToSd()
     file.println(seconds);
     file.sync();
     file.close();
+    cachedLogCount++;
     Serial.println("Successfully wrote to SD card.");
   }
   else
@@ -114,20 +116,27 @@ void initializeSdCard()
     Serial.println(F("Error: Could not open LOG.CSV for writing."));
   }
 
+  refreshLogCount();
   refreshFreeStorage();
 }
 
 int countLogs()
 {
+  return cachedLogCount;
+}
+
+void refreshLogCount()
+{
+  cachedLogCount = 0;
   if (!sdReady)
   {
-    return 0;
+    return;
   }
 
   FsFile file = sd.open("LOG.CSV", O_READ);
   if (!file)
   {
-    return 0;
+    return;
   }
 
   int lineCount = 0;
@@ -139,7 +148,7 @@ int countLogs()
     }
   }
   file.close();
-  return lineCount > 0 ? lineCount - 1 : 0;
+  cachedLogCount = lineCount > 0 ? lineCount - 1 : 0;
 }
 
 uint32_t freeStorageMegabytes()

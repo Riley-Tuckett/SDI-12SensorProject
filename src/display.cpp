@@ -49,7 +49,7 @@ void displayDashboard()
   display.print(measurementOrUnavailable(2));
   display.println(" hPa");
   display.setCursor(5, 60);
-  display.print("Gas Resistance: ");
+  display.print("Gas: ");
   display.print(measurementOrUnavailable(3));
   display.println(" kOhm");
   display.setCursor(5, 70);

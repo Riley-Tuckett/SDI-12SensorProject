@@ -48,6 +48,19 @@ namespace
     return response;
   }
 
+  String bmeMeasurementResponse()
+  {
+    return String(deviceAddress) + "+" + String(bme.temperature, 1) +
+           "+" + String(bme.humidity, 1) +
+           "+" + String(bme.pressure / 100.0F, 1) +
+           "+" + String(bme.gas_resistance / 1000.0F, 1);
+  }
+
+  String luxMeasurementResponse()
+  {
+    return String(deviceAddress) + "+" + String(lightMeter.readLightLevel(), 1);
+  }
+
   void discardIncomingBytes()
   {
     while (Serial1.available())
@@ -186,14 +199,47 @@ void sdi12Receive(String input)
       errorMessage();
       return;
     }
-    if (measurementPending || !measurementReady)
+    switch (input.charAt(2))
     {
-      errorMessage();
+    case '0':
+      if (measurementPending || !bmeExists || !bme.performReading())
+      {
+        errorMessage();
+        return;
+      }
+      sdi12Send(bmeMeasurementResponse());
+      return;
+
+    case '1':
+      if (measurementPending || !bhExists)
+      {
+        errorMessage();
+        return;
+      }
+      sdi12Send(luxMeasurementResponse());
+      return;
+
+    case '2':
+      if (measurementPending || !measurementReady)
+      {
+        errorMessage();
+        return;
+      }
+      sdi12Send(measurementResponse());
+      return;
+
+    case '3':
+    case '4':
+    case '5':
+    case '6':
+    case '7':
+    case '8':
+    case '9':
+      return;
+
+    default:
       return;
     }
-
-    sdi12Send(measurementResponse());
-    return;
 
   case 'I':
     if (input.length() != 2)
