@@ -18,10 +18,11 @@
 #define TFT_SCLK 13
 #define TFT_MOSI 11
 
-// Button Configs:
+// Button Configs & LEDs:
 const int button1Pin = 2;
 const int button2Pin = 3;
 const int alertLEDPin = 4;
+const int SDI_12_STATUS_LED_PIN = 9;
 
 const float lightAlertThresholdLux = 100.0F;
 const float humidityAlertThresholdPercent = 80.0F;
@@ -34,7 +35,7 @@ int hours = 0;
 int minutes = 0;
 int seconds = 0;
 
-// Hardware timer logging configuration (Nathan-Branch timer for 30s logs)
+// Hardware timer logging configuration (30s logs via TC5)
 volatile bool logRequested = false;
 volatile uint8_t halfSecondTicks = 0;
 
@@ -110,17 +111,31 @@ String command;
 char deviceAddress = '0';
 String deviceIdentification = "14ENG20009105916092";
 String measurements[5];
+String sdi12PendingMessage = "";
 uint8_t measurementCount = 0;
 bool bmeExists = false;
 bool bhExists = false;
 bool measurementReady = false;
 bool environmentalAlert = false;
+volatile bool sdi12Active = false;
+volatile bool sdi12State = false;
+volatile int sdi12BlinkCount = 0;
 float ambientLightLux = 0.0F;
 float humidityPercent = 0.0F;
 float gasResistanceKOhm = 0.0F;
 unsigned long previousDisplayUpdate = 0;
 const unsigned long displayInterval = 1000;
 unsigned long previousButtonDebug = 0;
+unsigned long sdi12StateStartTime = 0;
+
+enum SDI12SendState
+{
+  SDI_IDLE,
+  SDI_WAIT_5MS,
+  SDI_SENDING,
+  SDI_WAIT_10MS
+};
+SDI12SendState sdi12SendState = SDI_IDLE;
 
 // SD CARD SETUP:
 SdFs sd;
@@ -137,7 +152,7 @@ RTC_DS1307 rtc;
 #define SDConfig SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(4), &softSpi)
 bool sdReady = false;
 
-// SENSOR SAMPLING INTERRUPT && AVERAGE SAMPLING (Main branch):
+// SENSOR SAMPLING INTERRUPT && AVERAGE SAMPLING:
 volatile bool isTimerForSensorSamplingTriggered = false; // 50 ms timer flag for TC4.
 class AverageSamplingClass {
   public:
@@ -201,19 +216,54 @@ void SDI12Send(String message)
   Serial.print("message: ");
   Serial.println(message);
 
-  digitalWrite(DIRO, LOW);
-  delay(5);
-  Serial1.print(message);
-  Serial1.print("\r\n");
-  Serial1.flush();
-  delay(10);
-  digitalWrite(DIRO, HIGH);
-
-  while (Serial1.available())
+  if (sdi12SendState != SDI_IDLE)
   {
-    Serial1.read();
+    return;
   }
-  command = "";
+
+  sdi12PendingMessage = message;
+
+  sdi12Active = true;
+  digitalWrite(DIRO, LOW);
+  sdi12StateStartTime = millis();
+  sdi12SendState = SDI_WAIT_5MS;
+}
+
+void handleSDI12Send()
+{
+  // First state
+  if (sdi12SendState == SDI_WAIT_5MS)
+  {
+    if (millis() - sdi12StateStartTime >= 5)
+    {
+      Serial1.print(sdi12PendingMessage);
+      Serial1.print("\r\n");
+      sdi12StateStartTime = millis();
+      sdi12SendState = SDI_SENDING;
+    }
+  }
+
+  // Second State
+  if (sdi12SendState == SDI_SENDING)
+  {
+    unsigned long transmissionTime = (sdi12PendingMessage.length() + 2) * 9;
+    if (millis() - sdi12StateStartTime >= transmissionTime)
+    {
+      sdi12StateStartTime = millis();
+      sdi12SendState = SDI_WAIT_10MS;
+    }
+  }
+
+  // Third State
+  if (sdi12SendState == SDI_WAIT_10MS)
+  {
+    if (millis() - sdi12StateStartTime >= 10)
+    {
+      digitalWrite(DIRO, HIGH);
+      sdi12SendState = SDI_IDLE;
+      sdi12Active = false;
+    }
+  }
 }
 
 void initializeSensors()
@@ -687,6 +737,41 @@ void handleButtons()
   }
 }
 
+// Status LED Timer Setup (TC2 channel 0 for TC6)
+void ledTimerSetup()
+{
+  pmc_set_writeprotect(false);
+  pmc_enable_periph_clk(ID_TC6);
+  TC_Configure(TC2, 0, TC_CMR_TCCLKS_TIMER_CLOCK4 | TC_CMR_WAVE | TC_CMR_WAVSEL_UP_RC);
+  TC_SetRC(TC2, 0, 32813);
+  TC2->TC_CHANNEL[0].TC_IDR = 0xFFFFFFFF;
+  TC2->TC_CHANNEL[0].TC_IER = TC_IER_CPCS;
+  NVIC_EnableIRQ(TC6_IRQn);
+  TC_Start(TC2, 0);
+}
+
+void TC6_Handler()
+{
+  TC_GetStatus(TC2, 0);
+  if (sdi12Active)
+  {
+    sdi12BlinkCount++;
+    if (sdi12BlinkCount >= 2)
+    {
+      sdi12BlinkCount = 0;
+      sdi12State = !sdi12State;
+      digitalWrite(SDI_12_STATUS_LED_PIN, sdi12State ? HIGH : LOW);
+    }
+  }
+  else
+  {
+    sdi12BlinkCount = 0;
+    sdi12State = false;
+    digitalWrite(SDI_12_STATUS_LED_PIN, LOW);
+  }
+}
+
+// Sensor Sampling Hardware Timer Setup (TC1 channel 1 for TC4)
 void InitialiseHardwareTimerForSensorSampling() {
   pmc_set_writeprotect(false);
   pmc_enable_periph_clk((uint32_t)TC4_IRQn);
@@ -800,6 +885,9 @@ void setup()
   pinMode(button2Pin, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(button1Pin), button1ISR, FALLING);
   
+  pinMode(SDI_12_STATUS_LED_PIN, OUTPUT);
+  digitalWrite(SDI_12_STATUS_LED_PIN, LOW);
+
   Wire.begin();
   scanI2C();
 
@@ -820,6 +908,7 @@ void setup()
   display.setRotation(3);
   display.fillScreen(ST77XX_BLACK);
 
+  ledTimerSetup();
   configureLogTimer();
   Serial.println("Hardware timer logging started: 30-second interval");
 }
@@ -837,6 +926,7 @@ void loop()
   }
 
   handleButtons();
+  handleSDI12Send();
 
   while (Serial1.available())
   {
@@ -872,7 +962,6 @@ void loop()
   if (currentTime - previousDisplayUpdate >= displayInterval)
   {
     previousDisplayUpdate = currentTime;
-    readSensors();
 
     if (showSystemInfo)
     {
