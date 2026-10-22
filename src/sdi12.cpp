@@ -20,7 +20,9 @@ namespace
   unsigned long stateStartTime = 0;
   bool measurementPending = false;
   unsigned long measurementStartTime = 0;
-  constexpr unsigned long measurementDurationMs = 2000;
+  unsigned long measurementDurationMs = 2000;
+  constexpr unsigned long bmeMeasurementDurationMs = 2000;
+  constexpr unsigned long bhMeasurementDurationMs = 1000;
 
   void errorMessage()
   {
@@ -33,32 +35,32 @@ namespace
     Serial.println("5. aI! - Address Identification");
   }
 
-  String measurementResponse()
+  String valuesMeasurementResponse(const float values[], uint8_t valueCount)
   {
     String response = String(deviceAddress);
-    for (uint8_t index = 0; index < measurementCount; index++)
+    for (uint8_t index = 0; index < valueCount; index++)
     {
-      float value = measurements[index].toFloat();
-      if (value >= 0)
+      if (values[index] >= 0)
       {
         response += "+";
       }
-      response += measurements[index];
+      response += String(values[index], 1);
     }
     return response;
   }
 
-  String bmeMeasurementResponse()
+  unsigned long localMeasurementDurationMs()
   {
-    return String(deviceAddress) + "+" + String(bme.temperature, 1) +
-           "+" + String(bme.humidity, 1) +
-           "+" + String(bme.pressure / 100.0F, 1) +
-           "+" + String(bme.gas_resistance / 1000.0F, 1);
-  }
-
-  String luxMeasurementResponse()
-  {
-    return String(deviceAddress) + "+" + String(lightMeter.readLightLevel(), 1);
+    unsigned long duration = 0;
+    if (bmeExists && bmeMeasurementDurationMs > duration)
+    {
+      duration = bmeMeasurementDurationMs;
+    }
+    if (bhExists && bhMeasurementDurationMs > duration)
+    {
+      duration = bhMeasurementDurationMs;
+    }
+    return duration;
   }
 
   void discardIncomingBytes()
@@ -71,7 +73,7 @@ namespace
   }
 }
 
-void sdi12Send(String message)
+void SDI12Send(String message)
 {
   Serial.print("message: ");
   Serial.println(message);
@@ -88,7 +90,7 @@ void sdi12Send(String message)
   sendState = SendState::Wait5Ms;
 }
 
-void handleSdi12Send()
+void handleSDI12Send()
 {
   if (sendState == SendState::Wait5Ms && millis() - stateStartTime >= 5)
   {
@@ -117,33 +119,35 @@ void handleSdi12Send()
   }
 }
 
-bool sdi12IsBusy()
+bool SDI12IsBusy()
 {
-  return sendState != SendState::Idle;
+  return sendState != SendState::Idle || sdi12MasterBusy;
 }
 
-void discardSdi12Input()
+void DiscardSDI12Input()
 {
   discardIncomingBytes();
 }
 
-void handleSdi12Measurement()
+void handleSDI12Measurement()
 {
+  // Sensor samples arrive continuously from the timer path. This handler only
+  // announces that the SDI-12 measurement window has elapsed.
   if (measurementPending && millis() - measurementStartTime >= measurementDurationMs)
   {
-    readSensors();
+    measurementReady = measurementCount > 0;
     measurementPending = false;
   }
 }
 
-void sdi12Receive(String input)
+void SDI12Receive(String input)
 {
   Serial.print("Received SDI-12 command: ");
   Serial.println(input);
 
   if (input == "?")
   {
-    sdi12Send(String(deviceAddress));
+    SDI12Send(String(deviceAddress));
     return;
   }
   if (input.length() < 2 || input.charAt(0) != deviceAddress)
@@ -172,7 +176,7 @@ void sdi12Receive(String input)
         return;
       }
       deviceAddress = newAddress;
-      sdi12Send(String(deviceAddress));
+      SDI12Send(String(deviceAddress));
       Serial.print("Address changed to: ");
       Serial.println(deviceAddress);
     }
@@ -186,10 +190,27 @@ void sdi12Receive(String input)
     }
     measurementReady = false;
     measurementPending = true;
+    measurementDurationMs = localMeasurementDurationMs();
     measurementStartTime = millis();
     {
-      String response = String(deviceAddress) + "00205";
-      sdi12Send(response);
+      uint8_t activeValueCount = (bmeExists ? 4 : 0) + (bhExists ? 1 : 0);
+      unsigned long completionSeconds = (measurementDurationMs + 999) / 1000;
+      String response = String(deviceAddress);
+      if (completionSeconds < 100)
+      {
+        response += "0";
+      }
+      if (completionSeconds < 10)
+      {
+        response += "0";
+      }
+      response += String(completionSeconds);
+      if (activeValueCount < 10)
+      {
+        response += "0";
+      }
+      response += String(activeValueCount);
+      SDI12Send(response);
     }
     return;
 
@@ -199,25 +220,36 @@ void sdi12Receive(String input)
       errorMessage();
       return;
     }
+    // D0, D1, and D2 expose different slices of the same completed measurement.
     switch (input.charAt(2))
     {
     case '0':
+    {
       if (measurementPending || !bmeExists || !bme.performReading())
       {
         errorMessage();
         return;
       }
-      sdi12Send(bmeMeasurementResponse());
+      const float bmeValues[] = {
+          bme.temperature,
+          bme.humidity,
+          bme.pressure / 100.0F,
+          bme.gas_resistance / 1000.0F};
+      SDI12Send(valuesMeasurementResponse(bmeValues, 4));
       return;
+    }
 
     case '1':
+    {
       if (measurementPending || !bhExists)
       {
         errorMessage();
         return;
       }
-      sdi12Send(luxMeasurementResponse());
+      const float luxValue[] = {lightMeter.readLightLevel()};
+      SDI12Send(valuesMeasurementResponse(luxValue, 1));
       return;
+    }
 
     case '2':
       if (measurementPending || !measurementReady)
@@ -225,7 +257,7 @@ void sdi12Receive(String input)
         errorMessage();
         return;
       }
-      sdi12Send(measurementResponse());
+      SDI12Send(combinedMeasurementResponse());
       return;
 
     case '3':
@@ -247,7 +279,7 @@ void sdi12Receive(String input)
       errorMessage();
       return;
     }
-    sdi12Send(String(deviceAddress) + deviceIdentification);
+    SDI12Send(String(deviceAddress) + deviceIdentification);
     return;
 
   default:

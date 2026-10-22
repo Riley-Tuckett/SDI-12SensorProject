@@ -26,6 +26,7 @@ void configureLogTimer()
 void TC5_Handler()
 {
   TC_GetStatus(TC1, 2);
+  // Keep the interrupt short: the main loop performs the filesystem write.
   halfSecondTicks++;
   if (halfSecondTicks >= TICKS_PER_LOG)
   {
@@ -67,7 +68,7 @@ void TC6_Handler()
   }
 }
 
-void initializeSensorSamplingTimer()
+void InitialiseHardwareTimerForSensorSampling()
 {
   pmc_set_writeprotect(false);
   pmc_enable_periph_clk(static_cast<uint32_t>(TC4_IRQn));
@@ -83,5 +84,6 @@ void initializeSensorSamplingTimer()
 void TC4_Handler()
 {
   TC_GetStatus(TC1, 1);
+  // Sampling work runs in the main loop so I2C calls never happen in an ISR.
   isTimerForSensorSamplingTriggered = true;
 }

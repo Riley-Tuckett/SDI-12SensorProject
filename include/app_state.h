@@ -26,6 +26,8 @@ extern uint8_t measurementCount;
 extern bool bmeExists;
 extern bool bhExists;
 extern bool measurementReady;
+extern bool externalWeatherDataReady;
+extern String externalWeatherData;
 extern bool environmentalAlert;
 extern float ambientLightLux;
 extern float humidityPercent;
@@ -33,5 +35,6 @@ extern float gasResistanceKOhm;
 extern unsigned long previousDisplayUpdate;
 
 extern volatile bool sdi12Active;
+extern volatile bool sdi12MasterBusy;
 extern volatile bool sdi12State;
 extern volatile int sdi12BlinkCount;

@@ -12,4 +12,4 @@ extern float averageSampleValues[5];
 void scanI2C();
 void initializeSensors();
 void readSensors();
-void averageSensorSample();
+void AverageSensorSample();

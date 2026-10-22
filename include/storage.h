@@ -4,11 +4,11 @@
 
 extern bool sdReady;
 
-void initializeSdCard();
-void writeDataToSd();
-String readDataSd();
+void InitialiseSDCard();
+void WriteDataToSD();
+String ReadDataSD();
 int countLogs();
 void refreshLogCount();
 uint32_t freeStorageMegabytes();
 void refreshFreeStorage();
-void readRtc();
+void ReadRTC();
