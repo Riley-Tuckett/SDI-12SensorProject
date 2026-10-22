@@ -12,21 +12,32 @@ bool bmeValid = false;
 bool bhValid = false;
 float averageSampleValues[5] = {0};
 
-class AverageSamplingState
+class AverageSamplingClass
 {
-public:
-  float temperature[10] = {0};
-  float humidity[10] = {0};
-  float pressure[10] = {0};
-  float gas[10] = {0};
-  float lux[10] = {0};
-  int bmeIndex = 0;
-  int bmeSampleCount = 0;
-  int luxIndex = 0;
-  int luxSampleCount = 0;
+  public:
+    float tempSamples[10];
+    float humiditySamples[10];
+    float pressureSamples[10];
+    float gasSamples[10];
+    float luxSamples[10];
+    int bmeIndex = 0;
+    int bmeSampleCount = 0;
+    int luxIndex = 0;
+    int luxSampleCount = 0;
+  AverageSamplingClass() :
+      tempSamples{0},
+      humiditySamples{0},
+      pressureSamples{0},
+      gasSamples{0},
+      luxSamples{0},
+      bmeIndex(0),
+      bmeSampleCount(0),
+      luxIndex(0),
+      luxSampleCount(0)
+    {}
 };
 
-AverageSamplingState sampler;
+AverageSamplingClass sensorSampler;
 
 void scanI2C()
 {
@@ -100,54 +111,64 @@ void readSensors()
   digitalWrite(alertLEDPin, environmentalAlert ? HIGH : LOW);
 }
 
-void averageSensorSample()
+void AverageSensorSample()
 {
   readSensors();
 
+  // Keep the most recent ten readings so the display and logger can use a
+  // steadier value than a single noisy I2C conversion.
   if (bmeExists && bmeValid)
   {
-    sampler.temperature[sampler.bmeIndex] = measurements[0].toFloat();
-    sampler.humidity[sampler.bmeIndex] = measurements[1].toFloat();
-    sampler.pressure[sampler.bmeIndex] = measurements[2].toFloat();
-    sampler.gas[sampler.bmeIndex] = measurements[3].toFloat();
-    sampler.bmeIndex = (sampler.bmeIndex + 1) % 10;
-    if (sampler.bmeSampleCount < 10)
+    sensorSampler.tempSamples[sensorSampler.bmeIndex] = measurements[0].toFloat();
+    sensorSampler.humiditySamples[sensorSampler.bmeIndex] = measurements[1].toFloat();
+    sensorSampler.pressureSamples[sensorSampler.bmeIndex] = measurements[2].toFloat();
+    sensorSampler.gasSamples[sensorSampler.bmeIndex] = measurements[3].toFloat();
+
+    sensorSampler.bmeIndex = (sensorSampler.bmeIndex + 1) % 10;
+
+    if (sensorSampler.bmeSampleCount < 10)
     {
-      sampler.bmeSampleCount++;
+      sensorSampler.bmeSampleCount++;
     }
 
-    float sumTemperature = 0;
-    float sumHumidity = 0;
-    float sumPressure = 0;
-    float sumGas = 0;
-    for (int index = 0; index < sampler.bmeSampleCount; index++)
+    float sumTemp = 0, sumHum = 0, sumPres = 0, sumGas = 0;
+    for (int index = 0; index < sensorSampler.bmeSampleCount; index++)
     {
-      sumTemperature += sampler.temperature[index];
-      sumHumidity += sampler.humidity[index];
-      sumPressure += sampler.pressure[index];
-      sumGas += sampler.gas[index];
+      sumTemp += sensorSampler.tempSamples[index];
+      sumHum += sensorSampler.humiditySamples[index];
+      sumPres += sensorSampler.pressureSamples[index];
+      sumGas += sensorSampler.gasSamples[index];
     }
 
-    averageSampleValues[0] = sumTemperature / sampler.bmeSampleCount;
-    averageSampleValues[1] = sumHumidity / sampler.bmeSampleCount;
-    averageSampleValues[2] = sumPressure / sampler.bmeSampleCount;
-    averageSampleValues[3] = sumGas / sampler.bmeSampleCount;
+    if (sensorSampler.bmeSampleCount > 0)
+    {
+      averageSampleValues[0] = sumTemp / sensorSampler.bmeSampleCount;
+      averageSampleValues[1] = sumHum / sensorSampler.bmeSampleCount;
+      averageSampleValues[2] = sumPres / sensorSampler.bmeSampleCount;
+      averageSampleValues[3] = sumGas / sensorSampler.bmeSampleCount;
+    }
   }
 
   if (bhExists && bhValid)
   {
-    sampler.lux[sampler.luxIndex] = measurements[4].toFloat();
-    sampler.luxIndex = (sampler.luxIndex + 1) % 10;
-    if (sampler.luxSampleCount < 10)
+    sensorSampler.luxSamples[sensorSampler.luxIndex] = measurements[4].toFloat();
+
+    sensorSampler.luxIndex = (sensorSampler.luxIndex + 1) % 10;
+
+    if (sensorSampler.luxSampleCount < 10)
     {
-      sampler.luxSampleCount++;
+      sensorSampler.luxSampleCount++;
     }
 
     float sumLux = 0;
-    for (int index = 0; index < sampler.luxSampleCount; index++)
+    for (int index = 0; index < sensorSampler.luxSampleCount; index++)
     {
-      sumLux += sampler.lux[index];
+      sumLux += sensorSampler.luxSamples[index];
     }
-    averageSampleValues[4] = sumLux / sampler.luxSampleCount;
+
+    if (sensorSampler.luxSampleCount > 0)
+    {
+      averageSampleValues[4] = sumLux / sensorSampler.luxSampleCount;
+    }
   }
 }

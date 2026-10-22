@@ -2,9 +2,13 @@
 
 #include <Arduino.h>
 
-void sdi12Receive(String input);
-void sdi12Send(String message);
-void handleSdi12Send();
-void handleSdi12Measurement();
-bool sdi12IsBusy();
-void discardSdi12Input();
+void SDI12Receive(String input);
+void SDI12Send(String message);
+void handleSDI12Send();
+void handleSDI12Measurement();
+bool SDI12IsBusy();
+bool SDI12MasterIsBusy();
+void DiscardSDI12Input();
+String combinedMeasurementResponse();
+void InitialiseSDI12Master();
+void HandleSDI12Master();

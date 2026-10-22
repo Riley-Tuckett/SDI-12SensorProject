@@ -22,13 +22,14 @@ namespace
 
     Wire.begin();
     scanI2C();
-    initializeSdCard();
+    InitialiseSDCard();
     initializeSensors();
 
-    initializeSensorSamplingTimer();
+    InitialiseHardwareTimerForSensorSampling();
     Serial1.begin(1200, SERIAL_7E1);
     pinMode(DIRO, OUTPUT);
     digitalWrite(DIRO, HIGH);
+    InitialiseSDI12Master();
 
     initializeDisplay();
     initializeLedTimer();
@@ -37,9 +38,14 @@ namespace
 
   void receiveSdi12Commands()
   {
-    if (sdi12IsBusy())
+    if (SDI12MasterIsBusy())
     {
-      discardSdi12Input();
+      return;
+    }
+
+    if (SDI12IsBusy())
+    {
+      DiscardSDI12Input();
       return;
     }
 
@@ -48,7 +54,7 @@ namespace
       int receivedByte = Serial1.read();
       if (receivedByte == '!')
       {
-        sdi12Receive(command);
+        SDI12Receive(command);
         command = "";
       }
       else if (receivedByte != 0 && receivedByte != '\r' && receivedByte != '\n')
@@ -71,7 +77,7 @@ namespace
 
     if (scheduledLog || manualLog)
     {
-      writeDataToSd();
+      WriteDataToSD();
     }
   }
 }
@@ -86,29 +92,32 @@ void setup()
 
 void loop()
 {
-  handleSdi12Send();
-  handleSdi12Measurement();
+  // Keep the SDI-12 bus responsive before doing any slower sensor or SD work.
+  handleSDI12Send();
+  HandleSDI12Master();
+  handleSDI12Measurement();
   receiveSdi12Commands();
 
   handleButton1Interrupt();
 
-  if (!sdi12IsBusy() && !Serial1.available() && isTimerForSensorSamplingTriggered)
+  // A timer interrupt only raises the flag; the actual I2C read stays out of the ISR.
+  if (!SDI12IsBusy() && !Serial1.available() && isTimerForSensorSamplingTriggered)
   {
     noInterrupts();
     isTimerForSensorSamplingTriggered = false;
     interrupts();
-    averageSensorSample();
+    AverageSensorSample();
   }
 
   handleButtons();
 
-  if (!sdi12IsBusy() && !Serial1.available())
+  if (!SDI12IsBusy() && !Serial1.available())
   {
     processLogRequests();
   }
 
   unsigned long currentTime = millis();
-  if (!sdi12IsBusy() && !Serial1.available() &&
+  if (!SDI12IsBusy() && !Serial1.available() &&
       currentTime - previousDisplayUpdate >= displayInterval)
   {
     previousDisplayUpdate = currentTime;

@@ -2,4 +2,4 @@
 
 void configureLogTimer();
 void initializeLedTimer();
-void initializeSensorSamplingTimer();
+void InitialiseHardwareTimerForSensorSampling();

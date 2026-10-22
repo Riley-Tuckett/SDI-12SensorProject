@@ -21,7 +21,7 @@ bool sdReady = false;
 int cachedLogCount = 0;
 uint32_t cachedFreeStorageMegabytes = 0;
 
-void readRtc()
+void ReadRTC()
 {
   DateTime now = rtc.now();
   hours = now.hour();
@@ -29,7 +29,7 @@ void readRtc()
   seconds = now.second();
 }
 
-String readDataSd()
+String ReadDataSD()
 {
   String fileContent;
   FsFile file = sd.open("LOG.CSV", O_READ);
@@ -46,10 +46,10 @@ String readDataSd()
   return fileContent;
 }
 
-void writeDataToSd()
+void WriteDataToSD()
 {
   readSensors();
-  readRtc();
+  ReadRTC();
   if (!sdReady)
   {
     Serial.println("Skipping SD write: SD card is not initialized.");
@@ -84,7 +84,7 @@ void writeDataToSd()
   }
 }
 
-void initializeSdCard()
+void InitialiseSDCard()
 {
   Serial.println("Initializing SD card using Software SPI...");
   rtc.begin();
@@ -153,6 +153,7 @@ void refreshLogCount()
 
 uint32_t freeStorageMegabytes()
 {
+  // The expensive FAT scan happens during setup; the display only reads this cache.
   return cachedFreeStorageMegabytes;
 }
 
