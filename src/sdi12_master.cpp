@@ -26,7 +26,7 @@ namespace
 
   void startMasterCommand(const String &message, MasterState nextState)
   {
-    while (Serial1.available())
+    while (Serial1.available()  )
     {
       Serial1.read();
     }

@@ -8,6 +8,93 @@
 
 namespace
 {
+  constexpr size_t Sdi12RXBufferSize = 16;
+  constexpr unsigned long SDI12RXTimeoutTime = 1000;
+
+  char rxBuffer[Sdi12RXBufferSize];
+  size_t rxLength = 0;
+  unsigned long lastRxByte = 0;
+  bool rxOverflow = false;
+
+  void resetSdi12Parser()
+  {
+    rxLength = 0;
+    rxOverflow = false;
+    rxBuffer[0] = '\0';
+  }
+
+  void pollSdi12Receive(){
+      if (SDI12IsBusy()){
+      resetSdi12Parser();
+      return;
+    }
+    // Do not consume bytes belonging to the external weather-station master.
+    if (SDI12MasterIsBusy())
+    {
+      resetSdi12Parser();
+      return;
+    }
+
+    // Discard an incomplete command after a timeout.
+    if (rxLength > 0 &&
+        millis() - lastRxByte >= SDI12RXTimeoutTime)
+    {
+      Serial.println("SDI-12 RX timeout: discarding incomplete command");
+      resetSdi12Parser();
+    }
+
+    while (Serial1.available() > 0)
+    {
+      char c = static_cast<char>(Serial1.read());
+      lastRxByte = millis();
+
+      // Ignore line endings.
+      if (c == '\r' || c == '\n')
+      {
+        continue;
+      }
+
+      // Discard an overlength command until its terminator.
+      if (rxOverflow)
+      {
+        if (c == '!')
+        {
+          Serial.println("SDI-12 RX error: command too long");
+          resetSdi12Parser();
+        }
+        continue;
+      }
+
+      // Dispatch a complete command without its terminating '!'.
+      if (c == '!')
+      {
+        if (rxLength == 0)
+        {
+          Serial.println("SDI-12 RX error: empty command");
+          resetSdi12Parser();
+          continue;
+        }
+
+        rxBuffer[rxLength] = '\0';
+        String completeCommand(rxBuffer);
+
+        resetSdi12Parser();
+        SDI12Receive(completeCommand);
+        continue;
+      }
+
+      if (rxLength >= Sdi12RXBufferSize - 1)
+      {
+        rxOverflow = true;
+        continue;
+      }
+
+      rxBuffer[rxLength++] = c;
+      rxBuffer[rxLength] = '\0';
+    }
+  }
+
+
   enum class SendState
   {
     Idle,
@@ -73,6 +160,8 @@ namespace
   }
 }
 
+
+
 void SDI12Send(String message)
 {
   Serial.print("message: ");
@@ -88,6 +177,9 @@ void SDI12Send(String message)
   digitalWrite(DIRO, LOW);
   stateStartTime = millis();
   sendState = SendState::Wait5Ms;
+}
+void handleSDI12Receive(){
+  pollSdi12Receive();
 }
 
 void handleSDI12Send()

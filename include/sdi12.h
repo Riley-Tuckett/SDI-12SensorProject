@@ -12,3 +12,4 @@ void DiscardSDI12Input();
 String combinedMeasurementResponse();
 void InitialiseSDI12Master();
 void HandleSDI12Master();
+void handleSDI12Receive();
