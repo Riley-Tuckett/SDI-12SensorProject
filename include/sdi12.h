@@ -7,6 +7,7 @@ void SDI12Send(String message);
 void handleSDI12Send();
 void handleSDI12Measurement();
 bool SDI12IsBusy();
+bool SDI12SlaveMeasurementActive();
 bool SDI12MasterIsBusy();
 void DiscardSDI12Input();
 String combinedMeasurementResponse();

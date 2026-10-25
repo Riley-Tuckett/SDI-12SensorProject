@@ -19,8 +19,10 @@ namespace
   SendState sendState = SendState::Idle;
   unsigned long stateStartTime = 0;
   bool measurementPending = false;
+  bool slaveMeasurementActive = false;
   unsigned long measurementStartTime = 0;
   unsigned long measurementDurationMs = 2000;
+  unsigned long slaveMeasurementDeadline = 0;
   constexpr unsigned long bmeMeasurementDurationMs = 2000;
   constexpr unsigned long bhMeasurementDurationMs = 1000;
 
@@ -70,6 +72,19 @@ namespace
       Serial1.read();
     }
     command = "";
+  }
+
+  uint8_t countSignedValues(const String &values)
+  {
+    uint8_t count = 0;
+    for (unsigned int index = 0; index < values.length(); index++)
+    {
+      if (values.charAt(index) == '+' || values.charAt(index) == '-')
+      {
+        count++;
+      }
+    }
+    return count;
   }
 }
 
@@ -124,6 +139,11 @@ bool SDI12IsBusy()
   return sendState != SendState::Idle || sdi12MasterBusy;
 }
 
+bool SDI12SlaveMeasurementActive()
+{
+  return slaveMeasurementActive;
+}
+
 void DiscardSDI12Input()
 {
   discardIncomingBytes();
@@ -138,6 +158,12 @@ void handleSDI12Measurement()
     measurementReady = measurementCount > 0;
     measurementPending = false;
   }
+
+  if (slaveMeasurementActive &&
+      static_cast<long>(millis() - slaveMeasurementDeadline) >= 0)
+  {
+    slaveMeasurementActive = false;
+  }
 }
 
 void SDI12Receive(String input)
@@ -150,9 +176,14 @@ void SDI12Receive(String input)
     SDI12Send(String(deviceAddress));
     return;
   }
-  if (input.length() < 2 || input.charAt(0) != deviceAddress)
+  if (input.length() < 2)
   {
     errorMessage();
+    return;
+  }
+  if (input.charAt(0) != deviceAddress)
+  {
+    // On a shared SDI-12 bus, commands for another sensor address are ignored.
     return;
   }
 
@@ -192,8 +223,14 @@ void SDI12Receive(String input)
     measurementPending = true;
     measurementDurationMs = localMeasurementDurationMs();
     measurementStartTime = millis();
+    slaveMeasurementActive = true;
+    slaveMeasurementDeadline = measurementStartTime + measurementDurationMs + 10000;
     {
-      uint8_t activeValueCount = (bmeExists ? 4 : 0) + (bhExists ? 1 : 0);
+      uint8_t activeValueCount = (bmeValid ? 2 : 0) + (bhValid ? 1 : 0);
+      if (externalWeatherDataReady)
+      {
+        activeValueCount += countSignedValues(externalWeatherData);
+      }
       unsigned long completionSeconds = (measurementDurationMs + 999) / 1000;
       String response = String(deviceAddress);
       if (completionSeconds < 100)
@@ -205,11 +242,8 @@ void SDI12Receive(String input)
         response += "0";
       }
       response += String(completionSeconds);
-      if (activeValueCount < 10)
-      {
-        response += "0";
-      }
-      response += String(activeValueCount);
+      uint8_t reportCount = (activeValueCount > 9) ? 9 : activeValueCount;
+      response += String(reportCount);
       SDI12Send(response);
     }
     return;
@@ -220,22 +254,25 @@ void SDI12Receive(String input)
       errorMessage();
       return;
     }
-    // D0, D1, and D2 expose different slices of the same completed measurement.
+    // D0 returns the combined local temperature, humidity, lux, and external
+    // weather-station data required by the upstream logger.
     switch (input.charAt(2))
     {
     case '0':
     {
-      if (measurementPending || !bmeExists || !bme.performReading())
+      if (measurementPending)
       {
         errorMessage();
         return;
       }
-      const float bmeValues[] = {
-          bme.temperature,
-          bme.humidity,
-          bme.pressure / 100.0F,
-          bme.gas_resistance / 1000.0F};
-      SDI12Send(valuesMeasurementResponse(bmeValues, 4));
+      String response = combinedMeasurementResponse();
+      if (response.length() <= 1)
+      {
+        errorMessage();
+        return;
+      }
+      slaveMeasurementActive = false;
+      SDI12Send(response);
       return;
     }
 
