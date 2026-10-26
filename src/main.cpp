@@ -1,14 +1,5 @@
-// INCLUDES:
-#include <Adafruit_BME680.h>
-#include <Adafruit_Sensor.h>
 #include <Arduino.h>
-#include <BH1750.h>
 #include <Wire.h>
-#include <RTClib.h>
-#include "SdFat.h"
-#include <SPI.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_ST7735.h>
 
 // Button Configs
 const int BUTTON1_PIN = 2;
@@ -316,13 +307,29 @@ void SDI12Receive(String input)
       errorMessage();
       return;
     }
+#include "app_state.h"
+#include "buttons.h"
+#include "config.h"
+#include "display.h"
+#include "sdi12.h"
+#include "sensors.h"
+#include "storage.h"
+#include "timers.h"
 
-    deviceAddress = newAddress;
-    SDI12Send(String(deviceAddress));
-    Serial.print("Address changed to: ");
-    Serial.println(deviceAddress);
-    return;
-  }
+namespace
+{
+  void initializeHardware()
+  {
+    pinMode(alertLEDPin, OUTPUT);
+    digitalWrite(alertLEDPin, LOW);
+    pinMode(SDI_12_STATUS_LED_PIN, OUTPUT);
+    digitalWrite(SDI_12_STATUS_LED_PIN, LOW);
+    initializeButtons();
+
+    Wire.begin();
+    scanI2C();
+    InitialiseSDCard();
+    initializeSensors();
 
   // Start measurement: aM!
   case 'M':
@@ -348,51 +355,43 @@ void SDI12Receive(String input)
 
   // Send data: aD0! through aD9!
   case 'D':
+    InitialiseHardwareTimerForSensorSampling();
+    Serial1.begin(1200, SERIAL_7E1);
+    pinMode(DIRO, OUTPUT);
+    digitalWrite(DIRO, HIGH);
+    InitialiseSDI12Master();
+
+    initializeDisplay();
+    initializeLedTimer();
+    configureLogTimer();
+  }
+
+  void receiveSdi12Commands()
   {
-    if (input.length() != 3 || input.charAt(2) < '0' || input.charAt(2) > '9')
+    if (SDI12MasterIsBusy())
     {
-      errorMessage();
       return;
     }
 
-    switch (input.charAt(2))
+    if (SDI12IsBusy())
     {
-    case '0':
+      DiscardSDI12Input();
+      return;
+    }
+
+    while (Serial1.available())
     {
-      if (!bhExists)
+      int receivedByte = Serial1.read();
+      if (receivedByte == '!')
       {
-        errorMessage();
-        return;
+        SDI12Receive(command);
+        command = "";
       }
-
-      String response = String(deviceAddress) + "+" + String(lightMeter.readLightLevel(), 1);
-      SDI12Send(response);
-      return;
-    }
-
-    case '1':
-    {
-      if (!bmeExists || !bme.performReading())
+      else if (receivedByte == '\r' || receivedByte == '\n')
       {
-        errorMessage();
-        return;
-      }
-
-      String response = String(deviceAddress) +
-                        "+" + String(bme.temperature, 1) +
-                        "+" + String(bme.humidity, 1) +
-                        "+" + String(bme.pressure / 100.0F, 1) +
-                        "+" + String(bme.gas_resistance / 1000.0F, 1);
-      SDI12Send(response);
-      return;
-    }
-
-    case '2':
-      readSensors();
-      if (!measurementReady)
-      {
-        errorMessage();
-        return;
+        // Commands never contain carriage return or line feed. Any CR/LF without
+        // an exclamation mark represents a sensor response or noise on the bus.
+        command = "";
       }
       SDI12Send(measurementResponse());
       return;
@@ -737,8 +736,13 @@ bool buttonPressed(int pin, int &lastReading, int &stableState, unsigned long &l
 
       // INPUT_PULLUP means LOW indicates a press
       if (stableState == LOW)
+      else if (receivedByte != 0)
       {
-        return true;
+        command += static_cast<char>(receivedByte);
+        if (command.length() > 10)
+        {
+          command = "";
+        }
       }
     }
   }
@@ -796,14 +800,18 @@ void ledTimerSetup()
   NVIC_EnableIRQ(TC6_IRQn);
   TC_Start(TC2, 0);
 }
-
-void TC6_Handler()
-{
-  TC_GetStatus(TC2, 0);
-  if (sdi12Active)
+  void processLogRequests()
   {
-    sdi12BlinkCount++;
-    if (sdi12BlinkCount >= 2)
+    bool scheduledLog = false;
+    bool manualLog = false;
+    noInterrupts();
+    manualLog = manualLogRequested;
+    manualLogRequested = false;
+    scheduledLog = logRequested;
+    logRequested = false;
+    interrupts();
+
+    if (scheduledLog || manualLog)
     {
       sdi12BlinkCount = 0;
       sdi12State = !sdi12State;
@@ -852,6 +860,8 @@ int calculateHumidityRisk(float humidity)
   if (humidity < 30 && humidity > 0)
   {
     return ((30 - humidity) / 30) * 100;
+      WriteDataToSD();
+    }
   }
   if (humidity <= 0 || humidity >= 100)
   {
@@ -887,6 +897,7 @@ void watchdogSetup()
   WDT_Enable(WDT, WDT_MR_WDRSTEN | WDT_MR_WDV(512) | WDT_MR_WDD(512));
 }
 
+
 void setup()
 {
   Serial.begin(9600);
@@ -921,14 +932,33 @@ void setup()
   display.fillScreen(ST77XX_BLACK);
 
   ledTimerSetup();
+  initializeHardware();
+  Serial.println("SDI-12 ready");
+  Serial.println("Hardware timer logging started: 30-second interval");
 }
 
 void loop()
 {
-  handleButtons();
+  // Keep the SDI-12 bus responsive before doing any slower sensor or SD work.
   handleSDI12Send();
+  HandleSDI12Master();
+  handleSDI12Measurement();
+  handleSDI12Receive();
 
-  while (Serial1.available())
+  handleButton1Interrupt();
+
+  // A timer interrupt only raises the flag; the actual I2C read stays out of the ISR.
+  if (!SDI12IsBusy() && !Serial1.available() && isTimerForSensorSamplingTriggered)
+  {
+    noInterrupts();
+    isTimerForSensorSamplingTriggered = false;
+    interrupts();
+    AverageSensorSample();
+  }
+
+  handleButtons();
+
+  if (!SDI12IsBusy() && !Serial1.available())
   {
     int receivedByte = Serial1.read();
 
@@ -946,10 +976,12 @@ void loop()
   {
     millisBefore = millis();
     WriteDataToSD();
+    processLogRequests();
   }
 
   unsigned long currentTime = millis();
-  if (currentTime - previousDisplayUpdate >= displayInterval)
+  if (!SDI12IsBusy() && !Serial1.available() &&
+      currentTime - previousDisplayUpdate >= displayInterval)
   {
     previousDisplayUpdate = currentTime;
 
@@ -958,6 +990,7 @@ void loop()
       displayDashboard();
     }
     else if (currentScreen == 1)
+    if (showSystemInfo)
     {
       displaySystemInfo();
     }
