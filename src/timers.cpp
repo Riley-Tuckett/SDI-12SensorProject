@@ -7,7 +7,7 @@
 
 namespace
 {
-  volatile uint8_t halfSecondTicks = 0;
+  volatile uint8_t logTimerTicks = 0;
 }
 
 void configureLogTimer()
@@ -27,10 +27,10 @@ void TC5_Handler()
 {
   TC_GetStatus(TC1, 2);
   // Keep the interrupt short: the main loop performs the filesystem write.
-  halfSecondTicks++;
-  if (halfSecondTicks >= TICKS_PER_LOG)
+  logTimerTicks++;
+  if (logTimerTicks >= TICKS_PER_LOG)
   {
-    halfSecondTicks = 0;
+    logTimerTicks = 0;
     logRequested = true;
   }
 }

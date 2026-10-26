@@ -186,7 +186,8 @@ void AverageSensorSample()
 
   if (bhExists && bhValid)
   {
-    sensorSampler.luxSamples[sensorSampler.luxIndex] = measurements[4].toFloat();
+    uint8_t luxMeasurementIndex = bmeValid ? 4 : 0;
+    sensorSampler.luxSamples[sensorSampler.luxIndex] = measurements[luxMeasurementIndex].toFloat();
 
     sensorSampler.luxIndex = (sensorSampler.luxIndex + 1) % 10;
 

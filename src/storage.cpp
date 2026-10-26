@@ -48,13 +48,15 @@ String ReadDataSD()
 
 void WriteDataToSD()
 {
-  readSensors();
-  ReadRTC();
   if (!sdReady)
   {
     Serial.println("Skipping SD write: SD card is not initialized.");
     return;
   }
+
+  // Take a fresh sample and fold it into the moving averages before logging.
+  AverageSensorSample();
+  ReadRTC();
 
   FsFile file = sd.open("LOG.CSV", O_RDWR | O_CREAT | O_APPEND);
   if (file)
@@ -65,7 +67,15 @@ void WriteDataToSD()
       {
         file.print(',');
       }
-      file.print(averageSampleValues[index], 1);
+      bool valueAvailable = index < 4 ? (bmeExists && bmeValid) : (bhExists && bhValid);
+      if (valueAvailable)
+      {
+        file.print(averageSampleValues[index], 1);
+      }
+      else
+      {
+        file.print("N/A");
+      }
     }
 
     file.print(',');

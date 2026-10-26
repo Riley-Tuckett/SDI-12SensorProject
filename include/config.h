@@ -25,7 +25,7 @@ constexpr uint8_t SOFT_MISO_PIN = 12;
 constexpr uint8_t SOFT_MOSI_PIN = 11;
 constexpr uint8_t SOFT_SCK_PIN = 13;
 
-constexpr uint32_t TIMER_RC = 41016UL;
-constexpr uint8_t TICKS_PER_LOG = 60;
+constexpr uint32_t TIMER_RC = 41016UL; // TC1 channel 2 interval: approximately one second.
+constexpr uint8_t TICKS_PER_LOG = 30;
 constexpr unsigned long masterQueryIntervalMs = 30000;
 constexpr unsigned long masterInitialDelayMs = 6000;

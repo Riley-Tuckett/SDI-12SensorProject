@@ -23,8 +23,10 @@ namespace
     rxBuffer[0] = '\0';
   }
 
-  void pollSdi12Receive(){
-      if (SDI12IsBusy()){
+  void pollSdi12Receive()
+  {
+    if (SDI12IsBusy())
+    {
       resetSdi12Parser();
       return;
     }
@@ -36,7 +38,7 @@ namespace
     }
 
     // Discard an incomplete command after a timeout.
-    if (rxLength > 0 &&
+    if ((rxLength > 0 || rxOverflow) &&
         millis() - lastRxByte >= SDI12RXTimeoutTime)
     {
       Serial.println("SDI-12 RX timeout: discarding incomplete command");
@@ -51,6 +53,14 @@ namespace
       // Ignore line endings.
       if (c == '\r' || c == '\n')
       {
+        continue;
+      }
+
+      // UART framing errors can surface as NUL or other control bytes. Discard
+      // the rest of that frame so noise cannot become a valid command suffix.
+      if (static_cast<uint8_t>(c) < 0x20 || static_cast<uint8_t>(c) > 0x7e)
+      {
+        rxOverflow = true;
         continue;
       }
 
@@ -124,18 +134,37 @@ namespace
     Serial.println("5. aI! - Address Identification");
   }
 
-  String valuesMeasurementResponse(const float values[], uint8_t valueCount)
+  String dataResponseSegment(const String &response, uint8_t segmentIndex)
   {
-    String response = String(deviceAddress);
-    for (uint8_t index = 0; index < valueCount; index++)
+    constexpr size_t maxResponseLength = 35;
+    String segment = String(deviceAddress);
+    uint8_t currentSegment = 0;
+
+    // Each signed value starts with '+' or '-'. Keep values intact while
+    // splitting the payload across the standard D0-D9 response slots.
+    for (unsigned int start = 1; start < response.length();)
     {
-      if (values[index] >= 0)
+      unsigned int end = start + 1;
+      while (end < response.length() && response.charAt(end) != '+' && response.charAt(end) != '-')
       {
-        response += "+";
+        end++;
       }
-      response += String(values[index], 1);
+
+      String value = response.substring(start, end);
+      if (segment.length() + value.length() > maxResponseLength)
+      {
+        if (currentSegment == segmentIndex)
+        {
+          return segment;
+        }
+        currentSegment++;
+        segment = String(deviceAddress);
+      }
+      segment += value;
+      start = end;
     }
-    return response;
+
+    return currentSegment == segmentIndex ? segment : String();
   }
 
   unsigned long localMeasurementDurationMs()
@@ -247,7 +276,7 @@ void handleSDI12Measurement()
   // announces that the SDI-12 measurement window has elapsed.
   if (measurementPending && millis() - measurementStartTime >= measurementDurationMs)
   {
-    measurementReady = measurementCount > 0;
+    measurementReady = countSignedValues(combinedMeasurementResponse().substring(1)) > 0;
     measurementPending = false;
   }
 
@@ -318,11 +347,8 @@ void SDI12Receive(String input)
     slaveMeasurementActive = true;
     slaveMeasurementDeadline = measurementStartTime + measurementDurationMs + 10000;
     {
-      uint8_t activeValueCount = (bmeValid ? 2 : 0) + (bhValid ? 1 : 0);
-      if (externalWeatherDataReady)
-      {
-        activeValueCount += countSignedValues(externalWeatherData);
-      }
+      String responseValues = combinedMeasurementResponse();
+      uint8_t activeValueCount = countSignedValues(responseValues.substring(1));
       unsigned long completionSeconds = (measurementDurationMs + 999) / 1000;
       String response = String(deviceAddress);
       if (completionSeconds < 100)
@@ -346,18 +372,14 @@ void SDI12Receive(String input)
       errorMessage();
       return;
     }
-    // D0 returns the combined local temperature, humidity, lux, and external
-    // weather-station data required by the upstream logger.
-    switch (input.charAt(2))
+    if (measurementPending || !measurementReady)
     {
-    case '0':
+      errorMessage();
+      return;
+    }
+
     {
-      if (measurementPending)
-      {
-        errorMessage();
-        return;
-      }
-      String response = combinedMeasurementResponse();
+      String response = dataResponseSegment(combinedMeasurementResponse(), input.charAt(2) - '0');
       if (response.length() <= 1)
       {
         errorMessage();
@@ -365,40 +387,6 @@ void SDI12Receive(String input)
       }
       slaveMeasurementActive = false;
       SDI12Send(response);
-      return;
-    }
-
-    case '1':
-    {
-      if (measurementPending || !bhExists)
-      {
-        errorMessage();
-        return;
-      }
-      const float luxValue[] = {lightMeter.readLightLevel()};
-      SDI12Send(valuesMeasurementResponse(luxValue, 1));
-      return;
-    }
-
-    case '2':
-      if (measurementPending || !measurementReady)
-      {
-        errorMessage();
-        return;
-      }
-      SDI12Send(combinedMeasurementResponse());
-      return;
-
-    case '3':
-    case '4':
-    case '5':
-    case '6':
-    case '7':
-    case '8':
-    case '9':
-      return;
-
-    default:
       return;
     }
 
