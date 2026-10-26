@@ -28,4 +28,4 @@ constexpr uint8_t SOFT_SCK_PIN = 13;
 constexpr uint32_t TIMER_RC = 41016UL;
 constexpr uint8_t TICKS_PER_LOG = 60;
 constexpr unsigned long masterQueryIntervalMs = 30000;
-constexpr unsigned long masterInitialDelayMs = 1000;
+constexpr unsigned long masterInitialDelayMs = 6000;

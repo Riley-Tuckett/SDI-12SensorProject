@@ -71,11 +71,12 @@ void initializeSensors()
     Serial.println("BME680 not found at 0x76");
   }
 
-  bhExists = lightMeter.begin();
+  bhExists = lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, 0x23);
   if (!bhExists)
   {
     Serial.println("BH1750 not found at 0x23");
   }
+  readSensors();
 }
 
 void readSensors()

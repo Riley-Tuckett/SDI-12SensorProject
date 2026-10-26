@@ -57,9 +57,19 @@ namespace
         SDI12Receive(command);
         command = "";
       }
-      else if (receivedByte != 0 && receivedByte != '\r' && receivedByte != '\n')
+      else if (receivedByte == '\r' || receivedByte == '\n')
+      {
+        // Commands never contain carriage return or line feed. Any CR/LF without
+        // an exclamation mark represents a sensor response or noise on the bus.
+        command = "";
+      }
+      else if (receivedByte != 0)
       {
         command += static_cast<char>(receivedByte);
+        if (command.length() > 10)
+        {
+          command = "";
+        }
       }
     }
   }
