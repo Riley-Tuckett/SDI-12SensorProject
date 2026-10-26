@@ -16,6 +16,8 @@ extern volatile bool button1InterruptLocked;
 extern volatile bool button2EdgePending;
 extern volatile bool button2InterruptLocked;
 extern bool showSystemInfo;
+extern uint8_t currentScreen;
+extern int environmentalRisk;
 
 extern String command;
 extern char deviceAddress;
