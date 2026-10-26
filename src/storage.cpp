@@ -65,8 +65,19 @@ void WriteDataToSD()
       {
         file.print(',');
       }
-      file.print(measurements[index]);
+      file.print(averageSampleValues[index], 1);
     }
+
+    file.print(',');
+    if (externalWeatherDataReady)
+    {
+      file.print(externalWeatherData);
+    }
+    else
+    {
+      file.print("N/A");
+    }
+
     file.print(',');
     file.print(hours);
     file.print(',');
@@ -105,7 +116,7 @@ void InitialiseSDCard()
   {
     if (dataLog.size() == 0)
     {
-      dataLog.println(F("Tempurature,Humidity,Pressure,GasResistance,Lux,hourRTC,minuteRTC,secondRTC"));
+      dataLog.println(F("Tempurature,Humidity,Pressure,GasResistance,Lux,WeatherStation,hourRTC,minuteRTC,secondRTC"));
       dataLog.sync();
     }
     dataLog.close();
