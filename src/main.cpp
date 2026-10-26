@@ -92,6 +92,8 @@ namespace
   }
 }
 
+
+
 void setup()
 {
   Serial.begin(9600);
@@ -106,7 +108,7 @@ void loop()
   handleSDI12Send();
   HandleSDI12Master();
   handleSDI12Measurement();
-  receiveSdi12Commands();
+  handleSDI12Receive();
 
   handleButton1Interrupt();
 
