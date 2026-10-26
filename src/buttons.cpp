@@ -90,7 +90,10 @@ void handleButtons()
 
   if (edgeDetected)
   {
-    showSystemInfo = !showSystemInfo;
-    Serial.println(showSystemInfo ? "Screen: System info" : "Screen: LIVE DATA");
+    currentScreen = (currentScreen + 1) % 3;
+    showSystemInfo = currentScreen == 1;
+    if (currentScreen == 0) Serial.println("Screen: LIVE DATA");
+    else if (currentScreen == 1) Serial.println("Screen: System info");
+    else Serial.println("Screen: Environmental Risk");
   }
 }

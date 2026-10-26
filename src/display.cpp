@@ -2,6 +2,7 @@
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
+#include <math.h>
 
 #include "app_state.h"
 #include "config.h"
@@ -82,4 +83,30 @@ void displaySystemInfo()
   display.setTextColor(sdReady ? ST77XX_GREEN : ST77XX_RED);
   display.println(sdReady ? "READY" : "ERROR");
   display.setTextColor(ST77XX_WHITE);
+}
+
+void displayEnvironmentalRisk()
+{
+  display.fillScreen(ST77XX_BLACK);
+  display.setTextColor(ST77XX_WHITE);
+  display.setTextSize(1);
+  display.setCursor(5, 5);
+  display.println("Environmental Risk");
+
+  constexpr int centerX = 80, centerY = 95, radius = 45;
+  for (int angle = 0; angle <= 180; angle++)
+  {
+    uint16_t colour = angle <= 60 ? ST77XX_RED : (angle < 120 ? ST77XX_YELLOW : ST77XX_GREEN);
+    float radians = angle * PI / 180.0F;
+    display.fillCircle(centerX + cos(radians) * radius, centerY - sin(radians) * radius, 2, colour);
+  }
+  float needleRadians = (180.0F - environmentalRisk * 1.8F) * PI / 180.0F;
+  display.drawLine(centerX, centerY, centerX + cos(needleRadians) * 35,
+                   centerY - sin(needleRadians) * 35, ST77XX_WHITE);
+  display.fillCircle(centerX, centerY, 3, ST77XX_WHITE);
+  display.setCursor(55, 103);
+  display.print("Risk: "); display.print(environmentalRisk); display.println("%");
+  display.setCursor(60, 115);
+  display.setTextColor(environmentalRisk <= 33 ? ST77XX_GREEN : (environmentalRisk <= 66 ? ST77XX_YELLOW : ST77XX_RED));
+  display.print(environmentalRisk <= 33 ? "SAFE" : (environmentalRisk <= 66 ? "CAUTION" : "DANGER"));
 }

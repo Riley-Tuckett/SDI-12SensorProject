@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#include <math.h>
+#include <Adafruit_GFX.h>
 
 #include "app_state.h"
 #include "config.h"
@@ -71,11 +73,12 @@ void initializeSensors()
     Serial.println("BME680 not found at 0x76");
   }
 
-  bhExists = lightMeter.begin();
+  bhExists = lightMeter.begin(BH1750::CONTINUOUS_HIGH_RES_MODE, 0x23);
   if (!bhExists)
   {
     Serial.println("BH1750 not found at 0x23");
   }
+  readSensors();
 }
 
 void readSensors()
@@ -95,6 +98,10 @@ void readSensors()
     measurements[measurementCount++] = String(bme.pressure / 100.0F, 1);
     measurements[measurementCount++] = String(bme.gas_resistance / 1000.0F, 1);
     bmeValid = true;
+    environmentalRisk = calculateEnvironmentalRisk(
+        calculateTemperatureRisk(bme.temperature),
+        calculateHumidityRisk(bme.humidity),
+        calculatePressureRisk(bme.pressure / 100.0F));
   }
 
   if (bhExists)
@@ -109,6 +116,34 @@ void readSensors()
                        (bmeExists && humidityPercent > humidityAlertThresholdPercent) ||
                        (bmeExists && gasResistanceKOhm > gasAlertThresholdKohm);
   digitalWrite(alertLEDPin, environmentalAlert ? HIGH : LOW);
+}
+
+int calculateTemperatureRisk(float temperature)
+{
+  if (temperature >= 10 && temperature <= 25) return 0;
+  if (temperature > 25 && temperature < 45) return constrain((temperature - 25) * 5, 0, 100);
+  if (temperature > 0 && temperature < 10) return constrain((10 - temperature) * 10, 0, 100);
+  return 100;
+}
+
+int calculateHumidityRisk(float humidity)
+{
+  if (humidity >= 30 && humidity <= 60) return 0;
+  if (humidity > 60 && humidity < 100) return constrain((humidity - 60) * 2.5F, 0, 100);
+  if (humidity > 0 && humidity < 30) return constrain((30 - humidity) * (100.0F / 30.0F), 0, 100);
+  return 100;
+}
+
+int calculatePressureRisk(float pressure)
+{
+  if (pressure >= 1000) return 0;
+  if (pressure <= 960) return 100;
+  return constrain((1000 - pressure) * 2.5F, 0, 100);
+}
+
+int calculateEnvironmentalRisk(int temperatureRisk, int humidityRisk, int pressureRisk)
+{
+  return (temperatureRisk + humidityRisk + pressureRisk) / 3;
 }
 
 void AverageSensorSample()

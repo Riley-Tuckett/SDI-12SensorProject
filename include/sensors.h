@@ -8,6 +8,10 @@ extern BH1750 lightMeter;
 extern bool bmeValid;
 extern bool bhValid;
 extern float averageSampleValues[5];
+int calculateTemperatureRisk(float temperature);
+int calculateHumidityRisk(float humidity);
+int calculatePressureRisk(float pressure);
+int calculateEnvironmentalRisk(int temperatureRisk, int humidityRisk, int pressureRisk);
 
 void scanI2C();
 void initializeSensors();

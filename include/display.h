@@ -3,3 +3,4 @@
 void initializeDisplay();
 void displayDashboard();
 void displaySystemInfo();
+void displayEnvironmentalRisk();

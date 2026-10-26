@@ -14,6 +14,8 @@ volatile bool button1InterruptLocked = false;
 volatile bool button2EdgePending = false;
 volatile bool button2InterruptLocked = false;
 bool showSystemInfo = false;
+uint8_t currentScreen = 0;
+int environmentalRisk = 0;
 
 String command;
 char deviceAddress = '1';

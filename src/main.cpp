@@ -98,6 +98,7 @@ void setup()
 {
   Serial.begin(9600);
   initializeHardware();
+  WDT_Enable(WDT, WDT_MR_WDRSTEN | WDT_MR_WDV(512) | WDT_MR_WDD(512));
   Serial.println("SDI-12 ready");
   Serial.println("Hardware timer logging started: 30-second interval");
 }
@@ -133,13 +134,18 @@ void loop()
       currentTime - previousDisplayUpdate >= displayInterval)
   {
     previousDisplayUpdate = currentTime;
-    if (showSystemInfo)
+    if (currentScreen == 1)
     {
       displaySystemInfo();
+    }
+    else if (currentScreen == 2)
+    {
+      displayEnvironmentalRisk();
     }
     else
     {
       displayDashboard();
     }
   }
+  WDT_Restart(WDT);
 }
