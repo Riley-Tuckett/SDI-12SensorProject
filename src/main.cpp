@@ -34,7 +34,7 @@ int button2StableState = HIGH;
 unsigned long button2LastChange = 0;
 
 // For current dashboard screen state
-bool showSystemInfo = false; // RUBY USE THIS VARIABLE PLS
+int currentScreen = 0;
 
 // DEFINITIONS:
 #define DIRO 8
@@ -67,6 +67,11 @@ volatile int sdi12BlinkCount = 0;
 float ambientLightLux = 0.0F;
 float humidityPercent = 0.0F;
 float gasResistanceKOhm = 0.0F;
+int temperatureRisk = 0;
+int humidityRisk = 0;
+int pressureRisk = 0;
+int environmentalRisk = 0;
+const int buzzerPin = 5;
 unsigned long previousDisplayUpdate = 0;
 const unsigned long displayInterval = 1000;
 unsigned long previousButtonDebug = 0;
@@ -226,6 +231,21 @@ void readSensors()
     measurements[measurementCount++] = String(bme.humidity, 1);
     measurements[measurementCount++] = String(bme.pressure / 100.0F, 1);
     measurements[measurementCount++] = String(bme.gas_resistance / 1000.0F, 1);
+
+    temperatureRisk = calculateTemperatureRisk(bme.temperature);
+    humidityRisk = calculateHumidityRisk(bme.humidity);
+    pressureRisk = calculatePressureRisk(bme.pressure / 100.0F);
+
+    environmentalRisk = calculateEnvironmentalRisk(temperatureRisk, humidityRisk, pressureRisk);
+
+    if (environmentalRisk >= 67)
+    {
+      digitalWrite(buzzerPin, HIGH);
+    }
+    else
+    {
+      digitalWrite(buzzerPin, LOW);
+    }
   }
 
   if (bhExists)
@@ -625,6 +645,76 @@ void displaySystemInfo()
   display.setTextColor(ST77XX_WHITE);
 }
 
+void displayEnvironmentalRisk()
+{
+  display.fillScreen(ST77XX_BLACK);
+  display.setTextColor(ST77XX_WHITE);
+  display.setTextSize(1);
+  display.setCursor(5, 5);
+  display.println("Environmental Risk");
+
+  int centerX = 80;
+  int centerY = 95;
+  int radius = 45;
+
+  uint16_t colour;
+
+  for (int angle = 0; angle <= 180; angle++)
+  {
+    if (angle <= 60)
+    {
+      colour = ST77XX_RED;
+    }
+    else if (angle < 120)
+    {
+      colour = ST77XX_YELLOW;
+    }
+    else
+    {
+      colour = ST77XX_GREEN;
+    }
+    float radians = angle * PI / 180.0;
+
+    int x = centerX + cos(radians) * radius;
+    int y = centerY - sin(radians) * radius;
+
+    display.fillCircle(x, y, 2, colour);
+  }
+
+  float needleAngle = 180.0 - (environmentalRisk * 1.8);
+  float needleRadians = needleAngle * PI / 180.0;
+
+  int needleX = centerX + cos(needleRadians) * 35;
+  int needleY = centerY - sin(needleRadians) * 35;
+
+  display.drawLine(centerX, centerY, needleX, needleY, ST77XX_WHITE);
+  display.fillCircle(centerX, centerY, 3, ST77XX_WHITE);
+
+  display.setCursor(55, 103);
+  display.setTextColor(ST77XX_WHITE);
+  display.print("Risk: ");
+  display.print(environmentalRisk);
+  display.print("%");
+
+  display.setCursor(60, 115);
+
+  if (environmentalRisk <= 33)
+  {
+    display.setTextColor(ST77XX_GREEN);
+    display.print("SAFE");
+  }
+  else if (environmentalRisk <= 66)
+  {
+    display.setTextColor(ST77XX_YELLOW);
+    display.print("CAUTION");
+  }
+  else
+  {
+    display.setTextColor(ST77XX_RED);
+    display.print("DANGER");
+  }
+}
+
 // Button debouncing logic
 bool buttonPressed(int pin, int &lastReading, int &stableState, unsigned long &lastChange)
 {
@@ -673,15 +763,24 @@ void handleButtons()
   // Button 2: To toggle dashboard screen
   if (buttonPressed(BUTTON2_PIN, button2LastReading, button2StableState, button2LastChange))
   {
-    showSystemInfo = !showSystemInfo;
+    currentScreen++;
 
-    if (showSystemInfo)
+    if (currentScreen > 2)
+    {
+      currentScreen = 0;
+    }
+
+    if (currentScreen == 0)
+    {
+      Serial.println("Screen: LIVE DATA");
+    }
+    else if (currentScreen == 1)
     {
       Serial.println("Screen: System info");
     }
-    else
+    else if (currentScreen == 2)
     {
-      Serial.println("Screen: LIVE DATA");
+      Serial.println("Screen: Environmental Risk");
     }
   }
 }
@@ -719,6 +818,70 @@ void TC6_Handler()
   }
 }
 
+int calculateTemperatureRisk(float temperature)
+{
+  if (temperature >= 10 && temperature <= 25)
+  {
+    return 0;
+  }
+  if (temperature > 25 && temperature < 45)
+  {
+    return ((temperature - 25) / (20)) * 100;
+  }
+  if (temperature < 10 && temperature > 0)
+  {
+    return ((10 - temperature) / 10) * 100;
+  }
+  if (temperature <= 0 || temperature >= 45)
+  {
+    return 100;
+  }
+  return 0;
+}
+
+int calculateHumidityRisk(float humidity)
+{
+  if (humidity >= 30 && humidity <= 60)
+  {
+    return 0;
+  }
+  if (humidity > 60 && humidity < 100)
+  {
+    return ((humidity - 60) / 40) * 100;
+  }
+  if (humidity < 30 && humidity > 0)
+  {
+    return ((30 - humidity) / 30) * 100;
+  }
+  if (humidity <= 0 || humidity >= 100)
+  {
+    return 100;
+  }
+  return 0;
+}
+
+int calculatePressureRisk(float pressure)
+{
+  if (pressure >= 1000)
+  {
+    return 0;
+  }
+  if (pressure <= 960)
+  {
+    return 100;
+  }
+  if (pressure > 960 && pressure < 1000)
+  {
+    return ((1000 - pressure) / 40) * 100;
+  }
+  return 0;
+}
+
+int calculateEnvironmentalRisk(int temperatureRisk, int humidityRisk, int pressureRisk)
+{
+  return (temperatureRisk + humidityRisk + pressureRisk) / 3;
+}
+
 void watchdogSetup()
 {
   WDT_Enable(WDT, WDT_MR_WDRSTEN | WDT_MR_WDV(512) | WDT_MR_WDD(512));
@@ -731,6 +894,10 @@ void setup()
   digitalWrite(ALERT_LED_PIN, LOW);
   pinMode(BUTTON1_PIN, INPUT_PULLUP);
   pinMode(BUTTON2_PIN, INPUT_PULLUP);
+
+  pinMode(buzzerPin, OUTPUT);
+  digitalWrite(buzzerPin, LOW);
+
   Wire.begin();
   scanI2C();
 
@@ -786,13 +953,17 @@ void loop()
   {
     previousDisplayUpdate = currentTime;
 
-    if (showSystemInfo)
+    if (currentScreen == 0)
+    {
+      displayDashboard();
+    }
+    else if (currentScreen == 1)
     {
       displaySystemInfo();
     }
-    else
+    else if (currentScreen == 2)
     {
-      displayDashboard();
+      displayEnvironmentalRisk();
     }
   }
 
