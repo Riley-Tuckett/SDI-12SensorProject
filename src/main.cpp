@@ -18,6 +18,8 @@ namespace
     digitalWrite(alertLEDPin, LOW);
     pinMode(SDI_12_STATUS_LED_PIN, OUTPUT);
     digitalWrite(SDI_12_STATUS_LED_PIN, LOW);
+    pinMode(buzzerPin, OUTPUT);
+    digitalWrite(buzzerPin, LOW);
     initializeButtons();
 
     Wire.begin();

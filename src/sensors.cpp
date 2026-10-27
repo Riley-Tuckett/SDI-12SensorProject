@@ -102,6 +102,14 @@ void readSensors()
         calculateTemperatureRisk(bme.temperature),
         calculateHumidityRisk(bme.humidity),
         calculatePressureRisk(bme.pressure / 100.0F));
+    if (environmentalRisk >= 67)
+    {
+      digitalWrite(buzzerPin, HIGH);
+    }
+    else
+    {
+      digitalWrite(buzzerPin, LOW);
+    }
   }
 
   if (bhExists)
@@ -116,6 +124,8 @@ void readSensors()
                        (bmeExists && humidityPercent > humidityAlertThresholdPercent) ||
                        (bmeExists && gasResistanceKOhm > gasAlertThresholdKohm);
   digitalWrite(alertLEDPin, environmentalAlert ? HIGH : LOW);
+
+  
 }
 
 int calculateTemperatureRisk(float temperature)
