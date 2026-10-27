@@ -202,6 +202,12 @@ namespace
     }
     return count;
   }
+
+  char encodeMeasurementCount(uint8_t count)
+  {
+    return count < 10 ? static_cast<char>('0' + count)
+                      : static_cast<char>('A' + count - 10);
+  }
 }
 
 
@@ -349,6 +355,13 @@ void SDI12Receive(String input)
     {
       String responseValues = combinedMeasurementResponse();
       uint8_t activeValueCount = countSignedValues(responseValues.substring(1));
+      if (activeValueCount > 15)
+      {
+        Serial.println("SDI-12 M error: hexadecimal value count supports at most 15 values");
+        measurementPending = false;
+        slaveMeasurementActive = false;
+        return;
+      }
       unsigned long completionSeconds = (measurementDurationMs + 999) / 1000;
       String response = String(deviceAddress);
       if (completionSeconds < 100)
@@ -360,8 +373,7 @@ void SDI12Receive(String input)
         response += "0";
       }
       response += String(completionSeconds);
-      uint8_t reportCount = (activeValueCount > 9) ? 9 : activeValueCount;
-      response += String(reportCount);
+      response += encodeMeasurementCount(activeValueCount);
       SDI12Send(response);
     }
     return;
